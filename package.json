@@ -3,8 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node backend/server.js",
-    "start": "node backend/server.js"
+    "start": "node backend/server.js",
+    "start:fc": "PORT=9000 STORAGE_DRIVER=oss SERVER_MANAGED_MODEL_KEYS=1 node backend/server.js",
+    "check": "node --check app.js && node --check backend/server.js && node --check backend/data-store.js && node --check backend/oss-storage.js",
+    "test:serverless": "node tests/serverless-storage.test.js"
+  },
+  "dependencies": {
+    "ali-oss": "6.23.0"
   }
 }

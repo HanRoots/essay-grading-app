@@ -1,0 +1,18 @@
+{
+  "AllowedOrigin": [
+    "https://REPLACE_WITH_YOUR_FC_DOMAIN",
+    "https://REPLACE_WITH_YOUR_CUSTOM_DOMAIN"
+  ],
+  "AllowedMethod": [
+    "GET",
+    "PUT",
+    "HEAD"
+  ],
+  "AllowedHeader": [
+    "*"
+  ],
+  "ExposeHeader": [
+    "ETag"
+  ],
+  "MaxAgeSeconds": 600
+}

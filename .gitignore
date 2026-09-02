@@ -5,3 +5,7 @@ node_modules/
 .local-server.pid
 *.log
 *.zip
+dist/
+.env
+.env.*
+!.env.serverless.example

@@ -1,18 +1,35 @@
 const http = require("http");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { URL } = require("url");
-const { findPrompt, publicModelConfig, readData, resetRuntimeWorkspaceData, updateData, writeData } = require("./data-store");
+const { findPrompt, publicModelConfig, readData, resetRuntimeWorkspaceData, updateData } = require("./data-store");
 const { gradeEssayReport, recognizeEssayText, testCompatibleModelConnection } = require("./model-client");
 const { normalizeModelReport } = require("./report-engine");
+const {
+  collectImageObjectKeys,
+  createImageUploadSlots,
+  deleteObjectKeys,
+  getStorageRuntimeInfo,
+  hydrateImageListForClient,
+  isOssEnabled,
+  materializeImageList,
+  persistImageList
+} = require("./oss-storage");
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || process.env.FC_CUSTOM_LISTEN_PORT || 8787);
 const ROOT_DIR = path.join(__dirname, "..");
 const SERVER_SESSION_ID = `${Date.now()}-${process.pid}`;
 const SERVER_STARTED_AT = new Date().toISOString();
-const RESET_WORKSPACE_ON_START = process.env.RESET_WORKSPACE_ON_START === "1" || process.argv.includes("--reset-session");
-const STARTUP_RESET = RESET_WORKSPACE_ON_START ? resetRuntimeWorkspaceData() : null;
+const RESET_WORKSPACE_ON_START = !isOssEnabled() && (process.env.RESET_WORKSPACE_ON_START === "1" || process.argv.includes("--reset-session"));
+let startupReset = null;
+const STARTUP_READY = RESET_WORKSPACE_ON_START
+  ? resetRuntimeWorkspaceData().then((result) => {
+      startupReset = result;
+      return result;
+    })
+  : Promise.resolve(null);
 const PUBLIC_FILES = new Set(["/", "/index.html", "/capture.html", "/styles.css", "/app.js"]);
 const MAX_IMAGE_PAGES = 12;
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024;
@@ -30,6 +47,8 @@ const MIME_TYPES = {
 
 const server = http.createServer(async (req, res) => {
   try {
+    await STARTUP_READY;
+    if (!ensureAuthorized(req, res)) return;
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
       await handleApi(req, res, url);
@@ -44,11 +63,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.timeout = 0;
+server.keepAliveTimeout = 0;
 server.listen(PORT, "0.0.0.0", () => {
   const urls = getAccessUrls(PORT);
   console.log(`Essay grading prototype backend running at ${urls.local}`);
-  if (STARTUP_RESET) {
-    console.log(`Workspace session reset at ${STARTUP_RESET.resetAt}`);
+  if (startupReset) {
+    console.log(`Workspace session reset at ${startupReset.resetAt}`);
   }
   if (urls.lan.length) {
     console.log(`Phone capture page: ${urls.lan[0]}/capture.html`);
@@ -60,7 +81,9 @@ function getRuntimeInfo() {
     sessionId: SERVER_SESSION_ID,
     startedAt: SERVER_STARTED_AT,
     resetOnStart: RESET_WORKSPACE_ON_START,
-    resetAt: STARTUP_RESET?.resetAt || ""
+    resetAt: startupReset?.resetAt || "",
+    storage: getStorageRuntimeInfo(),
+    serverManagedModelKeys: usesServerManagedModelKeys()
   };
 }
 
@@ -85,25 +108,25 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
-    const data = readData();
+    const data = await readData();
     sendJson(res, 200, {
       runtime: getRuntimeInfo(),
       promptLibrary: data.promptLibrary,
       modelProviders: data.modelProviders,
       queueItems: data.queueItems.map(toQueueSummary),
-      modelConfig: publicModelConfig(data.modelConfig)
+      modelConfig: publicRuntimeModelConfig(data.modelConfig)
     });
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/prompts") {
-    sendJson(res, 200, readData().promptLibrary);
+    sendJson(res, 200, (await readData()).promptLibrary);
     return;
   }
 
   if (req.method === "PUT" && url.pathname === "/api/prompts/requirements") {
     const body = await readJsonBody(req);
-    const result = updateData((data) => {
+    const result = await updateData((data) => {
       const prompt = findPrompt(data, body);
       if (!prompt) return null;
       prompt.requirements = Array.isArray(body.requirements) ? body.requirements.filter(Boolean) : prompt.requirements;
@@ -120,17 +143,17 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/model-config") {
-    const data = readData();
+    const data = await readData();
     sendJson(res, 200, {
       providers: data.modelProviders,
-      config: publicModelConfig(data.modelConfig)
+      config: publicRuntimeModelConfig(data.modelConfig)
     });
     return;
   }
 
   if (req.method === "PUT" && url.pathname === "/api/model-config") {
     const body = await readJsonBody(req);
-    const result = updateData((data) => {
+    const result = await updateData((data) => {
       const provider = data.modelProviders.find((item) => item.id === body.provider) || data.modelProviders[0];
       const ocrProvider = resolveOcrProvider(data.modelProviders, body.ocrProvider) || provider;
       const ocrJudgeProvider = data.modelProviders.find((item) => item.id === body.ocrJudgeProvider) || data.modelProviders.find((item) => item.id === "deepseek") || provider;
@@ -148,18 +171,18 @@ async function handleApi(req, res, url) {
         model,
         apiMode: body.apiMode || "server",
         baseUrl: body.baseUrl || provider.baseUrl,
-        apiKey: body.apiKey || data.modelConfig.apiKey || "",
+        apiKey: persistentUiApiKey(body.apiKey, data.modelConfig.apiKey),
         allowInsecureTls: Boolean(body.allowInsecureTls),
         ocrMode: body.ocrMode || data.modelConfig.ocrMode || "enhanced",
         ocrProvider: ocrProvider.id,
         ocrModel,
         ocrBaseUrl: body.ocrBaseUrl || ocrProvider.baseUrl,
-        ocrApiKey: body.ocrApiKey || data.modelConfig.ocrApiKey || "",
+        ocrApiKey: persistentUiApiKey(body.ocrApiKey, data.modelConfig.ocrApiKey),
         ocrAllowInsecureTls: Boolean(body.ocrAllowInsecureTls),
         ocrJudgeProvider: ocrJudgeProvider.id,
         ocrJudgeModel,
         ocrJudgeBaseUrl: body.ocrJudgeBaseUrl || ocrJudgeProvider.baseUrl,
-        ocrJudgeApiKey: body.ocrJudgeApiKey || data.modelConfig.ocrJudgeApiKey || "",
+        ocrJudgeApiKey: persistentUiApiKey(body.ocrJudgeApiKey, data.modelConfig.ocrJudgeApiKey),
         ocrJudgeAllowInsecureTls: Boolean(body.ocrJudgeAllowInsecureTls),
         routes: {
           ocr: ocrModel,
@@ -169,7 +192,7 @@ async function handleApi(req, res, url) {
         version: currentVersion + 1,
         updatedAt: new Date().toISOString()
       };
-      return publicModelConfig(data.modelConfig);
+      return publicRuntimeModelConfig(data.modelConfig);
     });
     sendJson(res, 200, result);
     return;
@@ -177,7 +200,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/model-config/test") {
     const body = await readJsonBody(req);
-    const data = readData();
+    const data = await readData();
     const testingOcr = body.scope === "ocr";
     const testingOcrJudge = body.scope === "ocrJudge";
     const requestedProvider = testingOcrJudge ? body.ocrJudgeProvider : (testingOcr ? body.ocrProvider : body.provider);
@@ -193,7 +216,13 @@ async function handleApi(req, res, url) {
     const reuseMainKey = (testingOcr || testingOcrJudge) && provider.id === data.modelConfig.provider
       ? (requestMainKey || data.modelConfig.apiKey)
       : "";
-    const apiKey = (testingOcrJudge ? body.ocrJudgeApiKey : (testingOcr ? body.ocrApiKey : body.apiKey)) || savedKey || reuseMainKey || "";
+    const submittedKey = testingOcrJudge ? body.ocrJudgeApiKey : (testingOcr ? body.ocrApiKey : body.apiKey);
+    const apiKey = resolveModelApiKey({
+      providerId: provider.id,
+      scope: testingOcrJudge ? "judge" : (testingOcr ? "vision" : "grading"),
+      submittedKey,
+      storedKey: savedKey || reuseMainKey
+    });
     const allowInsecureTls = testingOcrJudge
       ? Boolean(body.ocrJudgeAllowInsecureTls || data.modelConfig.ocrJudgeAllowInsecureTls)
       : Boolean((testingOcr ? body.ocrAllowInsecureTls : body.allowInsecureTls) || (testingOcr ? data.modelConfig.ocrAllowInsecureTls : data.modelConfig.allowInsecureTls));
@@ -216,27 +245,31 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/submissions") {
-    const data = readData();
+    const data = await readData();
     sendJson(res, 200, data.queueItems.map(toQueueSummary));
     return;
   }
 
   if (req.method === "DELETE" && url.pathname === "/api/submissions") {
-    const deleted = updateData((data) => {
+    const dataBeforeDelete = await readData();
+    const objectKeys = collectImageObjectKeys(dataBeforeDelete.queueItems);
+    const deleted = await updateData((data) => {
       const count = data.queueItems.length;
       data.queueItems = [];
       data.reports = Array.isArray(data.reports) ? [] : [];
       return count;
     });
+    await deleteObjectKeys(objectKeys).catch((error) => console.warn(`OSS cleanup warning: ${error.message}`));
     sendJson(res, 200, { ok: true, deletedCount: deleted });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/submissions") {
     const body = await readJsonBody(req);
-    const submission = updateData((data) => {
+    const persistedImages = await persistImageList(normalizeImageData(body.imageData));
+    const submission = await updateData((data) => {
       const id = `q${data.nextIds.submission++}`;
-      const imageData = normalizeImageData(body.imageData);
+      const imageData = persistedImages;
       const item = {
         id,
         student: body.student || "未命名学生",
@@ -253,33 +286,47 @@ async function handleApi(req, res, url) {
         imageMeta: imageData.map(toImageMeta),
         imageData,
         customPrompt: body.customPrompt || null,
-        report: body.report || null,
+        report: stripReportImageCopies(body.report),
         status: body.status || "pending",
         createdAt: new Date().toISOString()
       };
       data.queueItems.unshift(item);
       return item;
     });
-    sendJson(res, 201, submission);
+    sendJson(res, 201, await hydrateSubmissionForClient(submission));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/uploads/presign") {
+    if (!isOssEnabled()) {
+      sendJson(res, 200, { ok: true, enabled: false, uploads: [] });
+      return;
+    }
+    const body = await readJsonBody(req);
+    const uploads = await createImageUploadSlots(Array.isArray(body.files) ? body.files : []);
+    sendJson(res, 200, { ok: true, enabled: true, uploads });
     return;
   }
 
   const submissionItemMatch = url.pathname.match(/^\/api\/submissions\/([^/]+)(?:\/autosave)?$/);
   if (req.method === "GET" && submissionItemMatch && !url.pathname.endsWith("/autosave")) {
     const id = decodeURIComponent(submissionItemMatch[1]);
-    const item = readData().queueItems.find((entry) => entry.id === id);
+    const item = (await readData()).queueItems.find((entry) => entry.id === id);
     if (!item) {
       sendJson(res, 404, { error: "submission_not_found", message: "任务不存在或已删除" });
       return;
     }
-    sendJson(res, 200, item);
+    sendJson(res, 200, await hydrateSubmissionForClient(item));
     return;
   }
 
   if ((req.method === "PATCH" || (req.method === "POST" && url.pathname.endsWith("/autosave"))) && submissionItemMatch) {
     const id = decodeURIComponent(submissionItemMatch[1]);
     const body = await readJsonBody(req);
-    const updated = updateData((data) => {
+    if (Object.prototype.hasOwnProperty.call(body, "imageData")) {
+      body.imageData = await persistImageList(normalizeImageData(body.imageData));
+    }
+    const updated = await updateData((data) => {
       const item = data.queueItems.find((entry) => entry.id === id);
       if (!item) return null;
       applySubmissionPatch(item, body);
@@ -289,13 +336,13 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "submission_not_found", message: "任务不存在或已删除" });
       return;
     }
-    sendJson(res, 200, updated);
+    sendJson(res, 200, await hydrateSubmissionForClient(updated));
     return;
   }
 
   if (req.method === "DELETE" && submissionItemMatch) {
     const id = decodeURIComponent(submissionItemMatch[1]);
-    const deleted = updateData((data) => {
+    const deleted = await updateData((data) => {
       const index = data.queueItems.findIndex((item) => item.id === id);
       if (index < 0) return null;
       const [item] = data.queueItems.splice(index, 1);
@@ -306,15 +353,16 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "submission_not_found", message: "任务不存在或已删除" });
       return;
     }
+    await deleteObjectKeys(collectImageObjectKeys([deleted])).catch((error) => console.warn(`OSS cleanup warning: ${error.message}`));
     sendJson(res, 200, { ok: true, deletedId: id });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/ocr") {
     const body = await readJsonBody(req);
-    const data = readData();
+    const data = await readData();
     const queueItem = body.queueId ? data.queueItems.find((item) => item.id === body.queueId) : null;
-    const images = normalizeImageData(body.images || queueItem?.imageData || []);
+    const images = await materializeImageList(normalizeImageData(body.images || queueItem?.imageData || []));
     if (!images.length) {
       sendJson(res, 400, { error: "no_images", message: "请先上传作文图片" });
       return;
@@ -325,8 +373,16 @@ async function handleApi(req, res, url) {
     const judgeProvider = data.modelProviders.find((item) => item.id === data.modelConfig.ocrJudgeProvider) || data.modelProviders.find((item) => item.id === "deepseek") || data.modelProviders[0];
     const judgeTextModels = textModelsForProvider(judgeProvider);
     const judgeModel = judgeTextModels.includes(data.modelConfig.ocrJudgeModel) ? data.modelConfig.ocrJudgeModel : judgeTextModels[0] || judgeProvider.models[0];
-    const ocrApiKey = data.modelConfig.ocrApiKey || (provider.id === data.modelConfig.provider ? data.modelConfig.apiKey : "") || "";
-    const judgeApiKey = data.modelConfig.ocrJudgeApiKey || (judgeProvider.id === data.modelConfig.provider ? data.modelConfig.apiKey : "") || "";
+    const ocrApiKey = resolveModelApiKey({
+      providerId: provider.id,
+      scope: "vision",
+      storedKey: data.modelConfig.ocrApiKey || (provider.id === data.modelConfig.provider ? data.modelConfig.apiKey : "")
+    });
+    const judgeApiKey = resolveModelApiKey({
+      providerId: judgeProvider.id,
+      scope: "judge",
+      storedKey: data.modelConfig.ocrJudgeApiKey || (judgeProvider.id === data.modelConfig.provider ? data.modelConfig.apiKey : "")
+    });
     try {
       const result = await recognizeEssayText({
         provider: provider.id,
@@ -348,7 +404,7 @@ async function handleApi(req, res, url) {
         images
       });
       if (queueItem) {
-        updateData((nextData) => {
+        await updateData((nextData) => {
           const nextItem = nextData.queueItems.find((item) => item.id === queueItem.id);
           if (nextItem) {
             nextItem.essay = result.text;
@@ -379,7 +435,7 @@ async function handleApi(req, res, url) {
     } catch (error) {
       const partialResult = error.partialResult || {};
       if (queueItem && (partialResult.text || partialResult.pageTexts?.length)) {
-        updateData((nextData) => {
+        await updateData((nextData) => {
           const nextItem = nextData.queueItems.find((item) => item.id === queueItem.id);
           if (nextItem) {
             nextItem.essay = partialResult.text || nextItem.essay || "";
@@ -420,7 +476,7 @@ async function handleApi(req, res, url) {
       });
       return;
     }
-    const data = readData();
+    const data = await readData();
     const prompt = body.prompt || findPrompt(data, body.promptRef || {});
     if (!prompt) {
       sendJson(res, 404, { error: "prompt_not_found" });
@@ -433,38 +489,45 @@ async function handleApi(req, res, url) {
         provider: provider.id,
         model: gradingModel,
         baseUrl: data.modelConfig.baseUrl || provider.baseUrl,
-        apiKey: data.modelConfig.apiKey || "",
+        apiKey: resolveModelApiKey({
+          providerId: provider.id,
+          scope: "grading",
+          storedKey: data.modelConfig.apiKey
+        }),
         allowInsecureTls: Boolean(data.modelConfig.allowInsecureTls),
         prompt,
         essay: body.essay,
         customInstructions: body.customInstructions
       });
-      const reportId = `r${data.nextIds.report++}`;
-      const report = normalizeModelReport({
-        id: reportId,
-        student: body.student,
-        school: body.school,
-        teacher: body.teacher,
-        prompt,
-        essay: body.essay,
-        modelConfig: {
-          ...data.modelConfig,
-          model: gradingModel
-        },
-        modelProviders: data.modelProviders,
-        modelReport: modelResult.report,
-        latencyMs: modelResult.latencyMs
-      });
-      data.reports.unshift(report);
-      if (body.queueId) {
-        const queueItem = data.queueItems.find((item) => item.id === body.queueId);
-        if (queueItem) {
-          queueItem.essay = body.essay;
-          queueItem.report = report;
-          queueItem.updatedAt = new Date().toISOString();
+      let report;
+      await updateData((nextData) => {
+        const reportId = `r${nextData.nextIds.report++}`;
+        report = normalizeModelReport({
+          id: reportId,
+          student: body.student,
+          school: body.school,
+          teacher: body.teacher,
+          prompt,
+          essay: body.essay,
+          modelConfig: {
+            ...nextData.modelConfig,
+            model: gradingModel
+          },
+          modelProviders: nextData.modelProviders,
+          modelReport: modelResult.report,
+          latencyMs: modelResult.latencyMs
+        });
+        nextData.reports.unshift(report);
+        if (body.queueId) {
+          const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
+          if (queueItem) {
+            queueItem.essay = body.essay;
+            queueItem.report = report;
+            queueItem.updatedAt = new Date().toISOString();
+          }
         }
-      }
-      writeData(data);
+        return report;
+      });
       sendJson(res, 200, report);
     } catch (error) {
       sendJson(res, 502, {
@@ -480,7 +543,116 @@ async function handleApi(req, res, url) {
 
 function getRequestOrigin(req) {
   const host = req.headers.host || `127.0.0.1:${PORT}`;
-  return `http://${host}`;
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || (req.socket.encrypted ? "https" : "http");
+  return `${protocol}://${host}`;
+}
+
+function ensureAuthorized(req, res) {
+  if (String(req.url || "").split("?")[0] === "/api/health") return true;
+  const password = String(process.env.APP_PASSWORD || "");
+  if (!password) {
+    if (isOssEnabled() && process.env.ALLOW_INSECURE_PUBLIC_ACCESS !== "1") {
+      sendJson(res, 503, {
+        error: "server_auth_required",
+        message: "云端部署必须设置 APP_PASSWORD 环境变量"
+      });
+      return false;
+    }
+    return true;
+  }
+  const username = String(process.env.APP_USERNAME || "teacher");
+  const authorization = String(req.headers.authorization || "");
+  if (authorization.startsWith("Basic ")) {
+    try {
+      const credentials = Buffer.from(authorization.slice(6), "base64").toString("utf8");
+      const separator = credentials.indexOf(":");
+      const suppliedUser = separator >= 0 ? credentials.slice(0, separator) : credentials;
+      const suppliedPassword = separator >= 0 ? credentials.slice(separator + 1) : "";
+      if (safeEqual(suppliedUser, username) && safeEqual(suppliedPassword, password)) return true;
+    } catch (error) {
+      // Fall through to the authentication challenge.
+    }
+  }
+  res.writeHead(401, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+    "WWW-Authenticate": "Basic realm=\"Essay Grading App\", charset=\"UTF-8\""
+  });
+  res.end("需要教师账号登录");
+  return false;
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  return leftBuffer.length === rightBuffer.length && cryptoSafeCompare(leftBuffer, rightBuffer);
+}
+
+function cryptoSafeCompare(left, right) {
+  return crypto.timingSafeEqual(left, right);
+}
+
+function usesServerManagedModelKeys() {
+  return isOssEnabled() || process.env.SERVER_MANAGED_MODEL_KEYS === "1";
+}
+
+function persistentUiApiKey(submittedKey, storedKey) {
+  if (usesServerManagedModelKeys() && process.env.ALLOW_UI_API_KEYS !== "1") return "";
+  return submittedKey || storedKey || "";
+}
+
+function publicRuntimeModelConfig(modelConfig) {
+  const visible = publicModelConfig(modelConfig);
+  return {
+    ...visible,
+    apiKeySet: Boolean(resolveModelApiKey({
+      providerId: modelConfig?.provider,
+      scope: "grading",
+      storedKey: modelConfig?.apiKey
+    })),
+    ocrApiKeySet: Boolean(resolveModelApiKey({
+      providerId: modelConfig?.ocrProvider,
+      scope: "vision",
+      storedKey: modelConfig?.ocrApiKey
+    })),
+    ocrJudgeApiKeySet: Boolean(resolveModelApiKey({
+      providerId: modelConfig?.ocrJudgeProvider,
+      scope: "judge",
+      storedKey: modelConfig?.ocrJudgeApiKey
+    })),
+    serverManagedKeys: usesServerManagedModelKeys()
+  };
+}
+
+function resolveModelApiKey({ providerId, scope, submittedKey = "", storedKey = "" }) {
+  const scopedEnvironmentKey = scope === "vision"
+    ? process.env.VISION_API_KEY
+    : (scope === "judge" ? process.env.JUDGE_API_KEY : process.env.MODEL_API_KEY);
+  const providerEnvironmentKeys = {
+    deepseek: process.env.DEEPSEEK_API_KEY,
+    kimi: process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY,
+    openai: process.env.OPENAI_API_KEY,
+    azure: process.env.AZURE_OPENAI_API_KEY,
+    qwen: process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY,
+    zhipu: process.env.ZHIPU_API_KEY
+  };
+  const environmentKey = String(scopedEnvironmentKey || providerEnvironmentKeys[providerId] || "").trim();
+  if (environmentKey) return environmentKey;
+  if (!usesServerManagedModelKeys() || process.env.ALLOW_UI_API_KEYS === "1") {
+    return String(submittedKey || storedKey || "").trim();
+  }
+  return "";
+}
+
+async function hydrateSubmissionForClient(item) {
+  if (!item) return item;
+  const imageData = await hydrateImageListForClient(item.imageData || []);
+  return {
+    ...item,
+    imageData,
+    report: item.report ? { ...item.report, sourceImages: imageData } : item.report
+  };
 }
 
 function buildCaptureUrl(origin, urls) {
@@ -584,17 +756,24 @@ function readJsonBody(req) {
 function normalizeImageData(images) {
   if (!Array.isArray(images)) return [];
   return images
-    .filter((item) => item && typeof item.dataUrl === "string" && item.dataUrl.startsWith("data:image/"))
+    .filter((item) => item && (
+      (typeof item.dataUrl === "string" && (item.dataUrl.startsWith("data:image/") || /^https:\/\//i.test(item.dataUrl)))
+      || (typeof item.storageKey === "string" && item.storageKey)
+    ))
     .slice(0, MAX_IMAGE_PAGES)
     .map((item, index) => ({
       id: item.id || `img-${index + 1}`,
       name: item.name || `作文图片${index + 1}.jpg`,
-      type: item.type || item.dataUrl.slice(5, item.dataUrl.indexOf(";")) || "image/jpeg",
+      type: item.type || (typeof item.dataUrl === "string" && item.dataUrl.startsWith("data:")
+        ? item.dataUrl.slice(5, item.dataUrl.indexOf(";"))
+        : "image/jpeg"),
       size: Number(item.size || 0),
       originalSize: Number(item.originalSize || item.size || 0),
-      dataUrl: item.dataUrl,
-      previewDataUrl: typeof item.previewDataUrl === "string" && item.previewDataUrl.startsWith("data:image/") ? item.previewDataUrl : item.dataUrl,
-      previewSize: Number(item.previewSize || 0)
+      dataUrl: String(item.dataUrl || ""),
+      previewDataUrl: typeof item.previewDataUrl === "string" && (item.previewDataUrl.startsWith("data:image/") || /^https:\/\//i.test(item.previewDataUrl)) ? item.previewDataUrl : item.dataUrl,
+      previewSize: Number(item.previewSize || 0),
+      storageKey: String(item.storageKey || ""),
+      previewStorageKey: String(item.previewStorageKey || "")
     }));
 }
 
@@ -620,7 +799,7 @@ function applySubmissionPatch(item, body) {
     item.customPrompt = body.customPrompt || null;
   }
   if (Object.prototype.hasOwnProperty.call(body, "report")) {
-    item.report = body.report || null;
+    item.report = stripReportImageCopies(body.report);
   }
   if (Object.prototype.hasOwnProperty.call(body, "ocrPages")) {
     item.ocrPages = Array.isArray(body.ocrPages) ? body.ocrPages : [];
@@ -660,7 +839,7 @@ function toQueueSummary(item) {
     imageData: [],
     hasImageData: normalizeImageData(item.imageData).length > 0,
     customPrompt: item.customPrompt || null,
-    report: item.report || null,
+    report: stripReportImageCopies(item.report),
     status: item.status || "pending",
     createdAt: item.createdAt || "",
     updatedAt: item.updatedAt || ""
@@ -676,6 +855,12 @@ function toImageMeta(image) {
     originalSize: image.originalSize,
     previewSize: image.previewSize
   };
+}
+
+function stripReportImageCopies(report) {
+  if (!report || typeof report !== "object") return null;
+  const { sourceImages, ...summary } = report;
+  return summary;
 }
 
 function preferredOcrModel(provider) {

@@ -146,6 +146,7 @@ const state = {
     ocrJudgeBaseUrl: "https://api.deepseek.com",
     ocrJudgeApiKey: "",
     ocrJudgeAllowInsecureTls: false,
+    serverManagedKeys: false,
     routes: {
       ocr: "moonshot-v1-128k-vision-preview",
       grading: "deepseek-v4-flash",
@@ -648,6 +649,87 @@ async function apiRequest(path, options = {}) {
   return response.json();
 }
 
+function usesDirectOssUploads() {
+  return Boolean(state.runtime?.storage?.directUploads);
+}
+
+async function ensureCloudImagesUploaded(images) {
+  const normalized = normalizeClientImages(images || []);
+  if (!usesDirectOssUploads()) return normalized;
+  const pending = normalized.filter((image) => !image.storageKey && isImageDataUrl(image.dataUrl));
+  if (!pending.length) return normalized;
+
+  const result = await apiRequest("/api/uploads/presign", {
+    method: "POST",
+    body: {
+      files: pending.map((image) => ({
+        id: image.id,
+        name: image.name,
+        type: image.type,
+        size: image.size,
+        previewSize: image.previewSize
+      }))
+    }
+  });
+  if (!result.enabled || !Array.isArray(result.uploads) || result.uploads.length !== pending.length) {
+    throw new Error("OSS 临时上传授权生成失败");
+  }
+
+  const slotsById = new Map(result.uploads.map((slot) => [slot.id, slot]));
+  await runWithConcurrency(pending, 2, async (image) => {
+    const slot = slotsById.get(image.id);
+    if (!slot?.uploadUrl || !slot?.previewUploadUrl) throw new Error("OSS 上传地址不完整");
+    await uploadDataUrlToSignedUrl(image.dataUrl, slot.uploadUrl);
+    await uploadDataUrlToSignedUrl(isImageDataUrl(image.previewDataUrl) ? image.previewDataUrl : image.dataUrl, slot.previewUploadUrl);
+    image.storageKey = slot.storageKey;
+    image.previewStorageKey = slot.previewStorageKey;
+  });
+  return normalized;
+}
+
+async function uploadDataUrlToSignedUrl(dataUrl, uploadUrl) {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    body: dataUrlToBlob(dataUrl)
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`作文图片上传 OSS 失败（${response.status}）${detail ? `：${detail.slice(0, 120)}` : ""}`);
+  }
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, encoded] = String(dataUrl || "").split(",", 2);
+  const mimeType = header.match(/^data:([^;]+)/)?.[1] || "application/octet-stream";
+  const binary = window.atob(encoded || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
+async function runWithConcurrency(items, concurrency, worker) {
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      await worker(items[currentIndex], currentIndex);
+    }
+  });
+  await Promise.all(runners);
+}
+
+function serializeImagesForApi(images) {
+  return normalizeClientImages(images || []).map((image) => {
+    if (!image.storageKey) return image;
+    return {
+      ...image,
+      dataUrl: "",
+      previewDataUrl: ""
+    };
+  });
+}
+
 function initModelConfig() {
   normalizeModelConfigAliases();
   $("#providerSelect").innerHTML = llmProviders().map((provider) => `<option value="${provider.id}">${provider.name}</option>`).join("");
@@ -713,6 +795,10 @@ function renderModelOptions() {
   $("#apiModeSelect").value = state.modelConfig.apiMode;
   $("#baseUrlInput").value = state.modelConfig.baseUrl || provider.baseUrl;
   $("#apiKeyInput").value = state.modelConfig.apiKey;
+  $("#apiKeyInput").disabled = Boolean(state.modelConfig.serverManagedKeys);
+  $("#apiKeyInput").placeholder = state.modelConfig.serverManagedKeys
+    ? (state.modelConfig.apiKeySet ? "已由云端环境变量配置" : "请在云端配置 MODEL_API_KEY")
+    : "sk-... 仅原型本地展示";
   $("#allowInsecureTlsInput").checked = Boolean(state.modelConfig.allowInsecureTls);
   renderRouteSelect("#gradingModelRoute", state.modelConfig.routes.grading, textModels, mainModel);
   renderRouteSelect("#polishModelRoute", state.modelConfig.routes.polish, textModels, mainModel);
@@ -731,9 +817,10 @@ function renderOcrModelOptions() {
   state.modelConfig.ocrModel = $("#ocrDedicatedModelSelect").value;
   $("#ocrBaseUrlInput").value = state.modelConfig.ocrBaseUrl || provider.baseUrl;
   $("#ocrApiKeyInput").value = state.modelConfig.ocrApiKey || "";
-  $("#ocrApiKeyInput").placeholder = provider.id === state.modelConfig.provider
-    ? `留空时复用主 ${provider.name} Key`
-    : `${provider.name} API Key`;
+  $("#ocrApiKeyInput").disabled = Boolean(state.modelConfig.serverManagedKeys);
+  $("#ocrApiKeyInput").placeholder = state.modelConfig.serverManagedKeys
+    ? (state.modelConfig.ocrApiKeySet ? "已由云端环境变量配置" : "请在云端配置 VISION_API_KEY")
+    : (provider.id === state.modelConfig.provider ? `留空时复用主 ${provider.name} Key` : `${provider.name} API Key`);
   $("#ocrAllowInsecureTlsInput").checked = Boolean(state.modelConfig.ocrAllowInsecureTls);
 }
 
@@ -751,6 +838,10 @@ function renderOcrJudgeOptions() {
   state.modelConfig.ocrJudgeModel = $("#ocrJudgeModelSelect").value;
   $("#ocrJudgeBaseUrlInput").value = state.modelConfig.ocrJudgeBaseUrl || provider.baseUrl;
   $("#ocrJudgeApiKeyInput").value = state.modelConfig.ocrJudgeApiKey || "";
+  $("#ocrJudgeApiKeyInput").disabled = Boolean(state.modelConfig.serverManagedKeys);
+  $("#ocrJudgeApiKeyInput").placeholder = state.modelConfig.serverManagedKeys
+    ? (state.modelConfig.ocrJudgeApiKeySet ? "已由云端环境变量配置" : "请在云端配置 JUDGE_API_KEY")
+    : `${provider.name} API Key`;
   $("#ocrJudgeAllowInsecureTlsInput").checked = Boolean(state.modelConfig.ocrJudgeAllowInsecureTls);
 }
 
@@ -3266,11 +3357,17 @@ async function runOcrFromImages() {
   button.textContent = "识别中";
   setOcrStatus(`正在逐页识别，共 ${state.currentImages.length} 张`, "pending");
   try {
+    state.currentImages = await ensureCloudImagesUploaded(state.currentImages);
+    syncCurrentQueueItem({
+      images: state.currentImages.length,
+      imageMeta: state.currentImages.map(toClientImageMeta),
+      imageData: state.currentImages
+    }, { immediate: true });
     const result = await apiRequest("/api/ocr", {
       method: "POST",
       body: {
         queueId: state.currentQueueId,
-        images: state.currentImages
+        images: serializeImagesForApi(state.currentImages)
       }
     });
     state.ocrText = result.text || "";
@@ -3501,9 +3598,18 @@ async function flushQueueAutosaves() {
   }
   state.autosaveInFlight = true;
   try {
-    for (const [itemId, fields] of entries) {
+    for (const [itemId, originalFields] of entries) {
+      let fields = originalFields;
       const item = queueItems.find((entry) => entry.id === itemId);
       if (!item) continue;
+      if (itemId.startsWith(LOCAL_DRAFT_ID_PREFIX) || Object.prototype.hasOwnProperty.call(fields, "imageData")) {
+        const uploadedImages = await ensureCloudImagesUploaded(fields.imageData || item.imageData || []);
+        item.imageData = uploadedImages;
+        item.imageMeta = uploadedImages.map(toClientImageMeta);
+        item.images = uploadedImages.length;
+        fields = { ...fields, imageData: uploadedImages };
+        if (state.currentQueueId === itemId) state.currentImages = uploadedImages;
+      }
       if (itemId.startsWith(LOCAL_DRAFT_ID_PREFIX)) {
         const saved = await apiRequest("/api/submissions", {
           method: "POST",
@@ -3512,20 +3618,35 @@ async function flushQueueAutosaves() {
         const localReport = item.report || null;
         Object.assign(item, saved);
         if (localReport && !item.report) item.report = localReport;
-        if (state.currentQueueId === itemId) state.currentQueueId = item.id;
+        if (state.currentQueueId === itemId) {
+          state.currentQueueId = item.id;
+          state.currentImages = normalizeClientImages(item.imageData || []);
+          renderImageWorkspace();
+        }
         renderQueue();
       } else {
-        await apiRequest(`/api/submissions/${encodeURIComponent(itemId)}`, {
+        const saved = await apiRequest(`/api/submissions/${encodeURIComponent(itemId)}`, {
           method: "PATCH",
           body: normalizeAutosaveFields(fields)
         });
+        const localReport = item.report || null;
+        Object.assign(item, saved);
+        if (localReport && !item.report) item.report = localReport;
+        if (state.currentQueueId === itemId && Object.prototype.hasOwnProperty.call(fields, "imageData")) {
+          state.currentImages = normalizeClientImages(item.imageData || []);
+          renderImageWorkspace();
+        }
       }
     }
   } catch (error) {
     entries.forEach(([itemId, fields]) => {
+      const currentItem = queueItems.find((item) => item.id === itemId);
+      const retryFields = Object.prototype.hasOwnProperty.call(fields, "imageData") && currentItem
+        ? { ...fields, imageData: currentItem.imageData || fields.imageData }
+        : fields;
       state.autosaveItems[itemId] = {
         ...(state.autosaveItems[itemId] || {}),
-        ...fields
+        ...retryFields
       };
     });
     setGradingStatus("自动保存失败，稍后会继续尝试", "pending");
@@ -3540,7 +3661,7 @@ async function flushQueueAutosaves() {
 function normalizeAutosaveFields(fields = {}) {
   const payload = { ...fields };
   if (Object.prototype.hasOwnProperty.call(payload, "imageData")) {
-    payload.imageData = normalizeClientImages(payload.imageData || []);
+    payload.imageData = serializeImagesForApi(payload.imageData || []);
     payload.imageMeta = payload.imageData.map(toClientImageMeta);
     payload.images = payload.imageData.length;
   }
@@ -3565,7 +3686,7 @@ function buildSubmissionPayload(item) {
     ocrPages: Array.isArray(item.ocrPages) ? item.ocrPages : [],
     ocrStatus: item.ocrStatus || "pending",
     images: imageData.length,
-    imageData,
+    imageData: serializeImagesForApi(imageData),
     customPrompt: normalizeCustomPrompt(item.customPrompt || state.customPrompt),
     report: item.report || null,
     status: item.status || "draft"
@@ -3689,7 +3810,7 @@ function estimateDataUrlSize(dataUrl) {
 function normalizeClientImages(images) {
   if (!Array.isArray(images)) return [];
   return images
-    .filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.startsWith("data:image/"))
+    .filter((image) => image && (isImageSource(image.dataUrl) || image.storageKey))
     .slice(0, MAX_IMAGE_PAGES)
     .map((image, index) => ({
       id: image.id || `img-${index + 1}`,
@@ -3697,9 +3818,11 @@ function normalizeClientImages(images) {
       type: image.type || "image/jpeg",
       size: Number(image.size || 0),
       originalSize: Number(image.originalSize || image.size || 0),
-      dataUrl: image.dataUrl,
-      previewDataUrl: isImageDataUrl(image.previewDataUrl) ? image.previewDataUrl : image.dataUrl,
-      previewSize: Number(image.previewSize || 0)
+      dataUrl: String(image.dataUrl || ""),
+      previewDataUrl: isImageSource(image.previewDataUrl) ? image.previewDataUrl : String(image.dataUrl || ""),
+      previewSize: Number(image.previewSize || 0),
+      storageKey: String(image.storageKey || ""),
+      previewStorageKey: String(image.previewStorageKey || "")
     }));
 }
 
@@ -3710,7 +3833,9 @@ function toClientImageMeta(image) {
     type: image.type,
     size: image.size,
     originalSize: image.originalSize,
-    previewSize: image.previewSize
+    previewSize: image.previewSize,
+    storageKey: image.storageKey || "",
+    previewStorageKey: image.previewStorageKey || ""
   };
 }
 
@@ -3718,8 +3843,12 @@ function isImageDataUrl(value) {
   return typeof value === "string" && value.startsWith("data:image/");
 }
 
+function isImageSource(value) {
+  return isImageDataUrl(value) || (typeof value === "string" && /^https:\/\//i.test(value));
+}
+
 function getImagePreviewDataUrl(image) {
-  return isImageDataUrl(image?.previewDataUrl) ? image.previewDataUrl : image?.dataUrl || "";
+  return isImageSource(image?.previewDataUrl) ? image.previewDataUrl : image?.dataUrl || "";
 }
 
 function renderLibraryTable() {
@@ -3890,6 +4019,7 @@ async function initCapturePage() {
     let saved = null;
     let submitError = "";
     try {
+      captureImages = await ensureCloudImagesUploaded(captureImages);
       saved = await apiRequest("/api/submissions", {
         method: "POST",
         body: {
@@ -3901,7 +4031,7 @@ async function initCapturePage() {
           book: prompt.book,
           unit: prompt.unit,
           images: count,
-          imageData: captureImages
+          imageData: serializeImagesForApi(captureImages)
         }
       });
     } catch (error) {

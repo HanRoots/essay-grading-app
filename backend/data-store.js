@@ -2,49 +2,59 @@ const fs = require("fs");
 const path = require("path");
 const { promptCatalog } = require("./prompt-catalog");
 const { createSeedData, modelProviders: seedModelProviders } = require("./seed-data");
+const { getObjectBuffer, isOssEnabled, putObjectBuffer } = require("./oss-storage");
 
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
+const DATA_OBJECT_KEY = String(process.env.OSS_DATA_OBJECT || "essay-grading/data/app-data.json").replace(/^\/+/, "");
 const DEEPSEEK_LEGACY_MODEL_ALIASES = {
   "deepseek-chat": "deepseek-v4-flash",
   "deepseek-reasoner": "deepseek-v4-flash"
 };
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
 
+let dataOperationQueue = Promise.resolve();
+
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   if (!fs.existsSync(DATA_FILE)) {
-    writeData(createSeedData());
+    writeLocalData(createSeedData());
   }
 }
 
-function readData() {
+function readLocalData() {
   ensureDataFile();
   const raw = fs.readFileSync(DATA_FILE, "utf8");
-  const data = JSON.parse(raw);
-  if (migrateData(data)) {
-    writeData(data);
-  }
-  return data;
+  return JSON.parse(raw);
 }
 
-function writeData(data) {
+function writeLocalData(data) {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
 }
 
-function updateData(mutator) {
-  const data = readData();
-  const result = mutator(data);
-  writeData(data);
-  return result;
+async function readData() {
+  return enqueueDataOperation(async () => cloneData(await readDataUnlocked()));
 }
 
-function resetRuntimeWorkspaceData() {
+async function writeData(data) {
+  return enqueueDataOperation(async () => writeDataUnlocked(cloneData(data)));
+}
+
+async function updateData(mutator) {
+  return enqueueDataOperation(async () => {
+    const data = await readDataUnlocked();
+    const result = await mutator(data);
+    await writeDataUnlocked(data);
+    return result;
+  });
+}
+
+async function resetRuntimeWorkspaceData() {
   return updateData((data) => {
     const removed = {
       queueItems: Array.isArray(data.queueItems) ? data.queueItems.length : 0,
@@ -59,6 +69,76 @@ function resetRuntimeWorkspaceData() {
       resetAt: new Date().toISOString()
     };
   });
+}
+
+async function readDataUnlocked() {
+  let data;
+  if (isOssEnabled()) {
+    try {
+      const content = await getObjectBuffer(DATA_OBJECT_KEY);
+      data = JSON.parse(content.toString("utf8"));
+    } catch (error) {
+      if (!isMissingObjectError(error)) throw error;
+      data = createSeedData();
+      await writeDataUnlocked(data);
+    }
+  } else {
+    data = readLocalData();
+  }
+  if (migrateData(data)) {
+    await writeDataUnlocked(data);
+  }
+  return data;
+}
+
+async function writeDataUnlocked(data) {
+  const persisted = sanitizeDataForPersistence(data);
+  if (isOssEnabled()) {
+    await putObjectBuffer(DATA_OBJECT_KEY, Buffer.from(JSON.stringify(persisted, null, 2), "utf8"), "application/json; charset=utf-8");
+  } else {
+    writeLocalData(persisted);
+  }
+}
+
+function enqueueDataOperation(operation) {
+  const next = dataOperationQueue.then(operation, operation);
+  dataOperationQueue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+function sanitizeDataForPersistence(data) {
+  const persisted = cloneData(data);
+  if (isOssEnabled() && persisted.modelConfig) {
+    persisted.modelConfig.apiKey = "";
+    persisted.modelConfig.ocrApiKey = "";
+    persisted.modelConfig.ocrJudgeApiKey = "";
+  }
+  if (Array.isArray(persisted.queueItems)) {
+    persisted.queueItems.forEach((item) => {
+      if (item?.report) item.report = stripReportImageCopies(item.report);
+    });
+  }
+  if (Array.isArray(persisted.reports)) {
+    persisted.reports = persisted.reports.map(stripReportImageCopies);
+  }
+  return persisted;
+}
+
+function stripReportImageCopies(report) {
+  if (!report || typeof report !== "object") return report;
+  const { sourceImages, ...persistedReport } = report;
+  return persistedReport;
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function isMissingObjectError(error) {
+  return error?.status === 404
+    || error?.statusCode === 404
+    || error?.code === "NoSuchKey"
+    || error?.name === "NoSuchKeyError";
 }
 
 function publicModelConfig(modelConfig) {
