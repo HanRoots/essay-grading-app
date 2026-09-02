@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>作文批改台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 6.5c0-1.1.9-2 2-2h8.2c.5 0 1 .2 1.4.6L20 9.5V19c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6.5Z" />
+              <path d="M14 5v5h5" />
+              <path d="M8 14h8M8 17h6" />
+            </svg>
+          </div>
+          <div>
+            <h1>作文批改台</h1>
+            <p>小学 3-6 年级</p>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" type="button" data-panel="workspace">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-13Z" />
+              <path d="M8 8h8M8 12h8M8 16h5" />
+            </svg>
+            批改工作台
+          </button>
+          <button class="nav-item" type="button" data-panel="library">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 19.5V5.8C4 4.8 4.8 4 5.8 4H19v14H5.8C4.8 18 4 18.7 4 19.5Z" />
+              <path d="M7 7h8M7 10h7M6 18h13" />
+            </svg>
+            教材题库
+          </button>
+          <button class="nav-item" type="button" data-panel="models">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+              <path d="M12 12l8-4.5M12 12v9M12 12 4 7.5" />
+            </svg>
+            模型配置
+          </button>
+          <a class="nav-item link-item" href="capture.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 7h10l1.5 2H21v10H3V9h2.5L7 7Z" />
+              <circle cx="12" cy="14" r="3.2" />
+            </svg>
+            手机拍照页
+          </a>
+        </nav>
+
+        <section class="queue-panel" aria-label="待处理队列">
+          <div class="section-title-row">
+            <h2>待处理</h2>
+            <span class="count-pill" id="queueCount">3</span>
+            <button class="queue-clear-button" type="button" id="clearQueueButton">清空</button>
+          </div>
+          <div class="queue-list" id="queueList"></div>
+        </section>
+      </aside>
+
+      <main class="main-area">
+        <section class="topbar">
+          <div>
+            <input class="student-title-input" id="currentStudentTitle" type="text" placeholder="姓名" aria-label="学生姓名" />
+          </div>
+          <div class="topbar-actions">
+            <span class="model-pill" id="activeModelPill">OpenAI · GPT-4.1</span>
+            <span class="capture-share-chip" id="captureShareChip" hidden>
+              <span>手机访问</span>
+              <code id="captureShareUrl"></code>
+              <button type="button" id="copyCaptureUrlButton">复制</button>
+            </span>
+            <button class="icon-button" type="button" id="openCaptureButton" title="打开手机拍照页" aria-label="打开手机拍照页">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
+                <path d="M10 18h4" />
+              </svg>
+            </button>
+            <button class="primary-button" type="button" id="generateButton">批改</button>
+            <span class="grading-status-chip" id="gradingStatus" hidden></span>
+          </div>
+        </section>
+
+        <section class="panel active" id="workspacePanel" data-panel-view="workspace">
+          <div class="workspace-grid">
+            <section class="work-column">
+              <div class="module-block task-workspace-module">
+                <div class="module-heading">
+                  <div>
+                    <p class="eyebrow">作文任务</p>
+                    <h3>题目与要求</h3>
+                  </div>
+                  <div class="task-actions">
+                    <button class="secondary-button compact-button" type="button" id="toggleCustomPromptButton">自定义题目</button>
+                    <button class="secondary-button compact-button" type="button" id="toggleRequirementEditor">修改作文要求</button>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label>
+                    年级
+                    <select id="gradeSelect"></select>
+                  </label>
+                  <label>
+                    册次
+                    <select id="bookSelect"></select>
+                  </label>
+                  <label>
+                    单元
+                    <select id="unitSelect"></select>
+                  </label>
+                </div>
+                <div class="prompt-box">
+                  <div>
+                    <span class="field-label">习作题目</span>
+                    <strong id="promptTitle"></strong>
+                  </div>
+                  <ul id="requirementList"></ul>
+                  <div class="custom-prompt-editor" id="customPromptEditor" hidden>
+                    <div class="form-grid custom-prompt-grid">
+                      <label>
+                        自定义题目
+                        <input class="config-input" id="customPromptTitleInput" type="text" placeholder="例如：一次难忘的尝试" />
+                      </label>
+                      <label>
+                        年级
+                        <input class="config-input" id="customPromptGradeInput" type="text" placeholder="例如：五年级" />
+                      </label>
+                      <label>
+                        册次/阶段
+                        <input class="config-input" id="customPromptBookInput" type="text" placeholder="例如：下册 / 校内练习" />
+                      </label>
+                    </div>
+                    <label>
+                      单元/来源
+                      <input class="config-input" id="customPromptUnitInput" type="text" placeholder="例如：自定义作文 / 周末练笔" />
+                    </label>
+                    <label>
+                      写作要求（每行一条）
+                      <textarea id="customPromptRequirementsInput" spellcheck="false" placeholder="例如：&#10;写清楚事情的起因、经过和结果&#10;把最重要的部分写具体&#10;表达自己的真实感受"></textarea>
+                    </label>
+                    <p class="custom-prompt-note">自定义题目只用于本次批改，不会写入教材题库。</p>
+                  </div>
+                </div>
+                <div class="requirement-editor" id="requirementEditor" hidden>
+                  <div class="editor-title-row">
+                    <span class="field-label">后台配置项</span>
+                    <span class="status-chip pending">本地草稿</span>
+                  </div>
+                  <div id="requirementEditorList"></div>
+                  <div class="input-actions">
+                    <button class="secondary-button" type="button" id="addRequirementButton">新增要求</button>
+                    <button class="primary-button" type="button" id="saveRequirementButton">保存配置</button>
+                  </div>
+                </div>
+                <div class="grading-hint-box">
+                  <div class="editor-title-row">
+                    <span class="field-label">批改前提示词</span>
+                    <button class="ghost-button compact-button" type="button" id="resetGradingHintButton">恢复默认</button>
+                  </div>
+                  <textarea id="gradingHintInput" spellcheck="false"></textarea>
+                </div>
+              </div>
+
+              <div class="module-block ocr-workspace-module">
+                <div class="module-heading">
+                  <div>
+                    <p class="eyebrow">作文原文</p>
+                    <h3>识别文本区</h3>
+                  </div>
+                  <span class="metric-chip"><span id="charCount">0</span> 字</span>
+                </div>
+                <textarea id="essayInput" spellcheck="false" placeholder="如果学生作文字迹过于潦草导致识别率较低，可以先使用大模型（如 DeepSeek）进行识别，然后将识别出的文本复制过来再点击批改，同时注意不要删除原始图片。"></textarea>
+                <div class="ocr-review">
+                  <div class="thumb-grid ocr-thumb-grid" id="ocrThumbGrid" aria-label="已上传原文图片"></div>
+                  <div class="input-actions">
+                    <label class="file-trigger">
+                      <input id="imageInput" type="file" accept="image/*" multiple />
+                      上传原文图片
+                    </label>
+                    <button class="secondary-button" type="button" id="runOcrButton">识别图片</button>
+                    <button class="ghost-button" type="button" id="clearButton">清空</button>
+                  </div>
+                  <div class="capture-result compact" id="ocrStatus"></div>
+                </div>
+              </div>
+
+              <div class="module-block image-workspace-module">
+                <div class="module-heading">
+                  <div>
+                    <p class="eyebrow">原文图片</p>
+                    <h3>批注定位</h3>
+                  </div>
+                  <span class="legend"><i class="dot red"></i>佳句 <i class="dot blue"></i>润色</span>
+                </div>
+                <div class="image-stage" id="imageStage">
+                  <div class="image-empty-state">
+                    <strong>暂无原文图片</strong>
+                    <p>上传或拍照后，这里会显示可联动的批注定位。</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="report-column">
+              <div class="report-toolbar">
+                <div class="tab-list" role="tablist" aria-label="报告模块">
+                  <button class="tab-button active" type="button" data-report-tab="overview">首页</button>
+                  <button class="tab-button" type="button" data-report-tab="annotations">点评</button>
+                  <button class="tab-button" type="button" data-report-tab="upgrade">升格</button>
+                  <button class="tab-button" type="button" data-report-tab="polished">润色</button>
+                </div>
+                <div class="report-actions">
+                  <button class="icon-button" type="button" id="toggleEditButton" title="编辑报告" aria-label="编辑报告">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+                      <path d="M13.5 7.5l3 3" />
+                    </svg>
+                  </button>
+                  <button class="icon-button" type="button" id="printButton" title="打印或导出 PDF" aria-label="打印或导出 PDF">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M7 8V4h10v4" />
+                      <path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+                      <path d="M7 14h10v6H7z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <article class="report-paper" id="reportPaper">
+                <div class="report-empty" id="reportEmpty">
+                  <div class="empty-visual" aria-hidden="true">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                  </div>
+                  <h3>无任务</h3>
+                  <p>请从手机拍照页添加任务，或在识别文本区输入作文后批改。</p>
+                </div>
+
+                <section class="report-section active" data-report-view="overview"></section>
+                <section class="report-section" data-report-view="annotations"></section>
+                <section class="report-section" data-report-view="upgrade"></section>
+                <section class="report-section" data-report-view="polished"></section>
+              </article>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel" id="libraryPanel" data-panel-view="library">
+          <div class="module-block">
+            <div class="module-heading">
+              <div>
+                <p class="eyebrow">小学 3-6 年级</p>
+                <h3>教材题库草表</h3>
+              </div>
+              <span class="status-chip success" id="libraryCountStatus">0 条</span>
+            </div>
+            <div class="library-summary" id="librarySummary"></div>
+            <div class="library-table-wrap">
+              <table class="library-table">
+                <thead>
+                  <tr>
+                    <th>年级</th>
+                    <th>册次</th>
+                    <th>单元</th>
+                    <th>习作题目</th>
+                    <th>题型</th>
+                    <th>审核状态</th>
+                  </tr>
+                </thead>
+                <tbody id="libraryTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="modelsPanel" data-panel-view="models">
+          <div class="settings-grid">
+            <div class="module-block model-config-card">
+              <div class="module-heading">
+                <div>
+                  <p class="eyebrow">后台设置</p>
+                  <h3>大模型 API</h3>
+                </div>
+                <span class="status-chip success" id="modelStatus">已保存</span>
+              </div>
+              <div class="form-grid model-form-grid">
+                <label>
+                  服务商
+                  <select id="providerSelect"></select>
+                </label>
+                <label>
+                  模型
+                  <select id="modelSelect"></select>
+                </label>
+                <label>
+                  调用模式
+                  <select id="apiModeSelect">
+                    <option value="server">服务端代理</option>
+                    <option value="compatible">OpenAI 兼容接口</option>
+                    <option value="private">私有化部署</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-grid model-form-grid wide">
+                <label>
+                  Base URL
+                  <input class="config-input" id="baseUrlInput" type="url" />
+                </label>
+                <label>
+                  API Key
+                  <input class="config-input" id="apiKeyInput" type="password" placeholder="sk-... 仅原型本地展示" />
+                </label>
+              </div>
+              <details class="advanced-route-box" id="advancedRouteBox">
+                <summary>
+                  <span>高级：任务模型路由</span>
+                  <small>默认跟随上方模型</small>
+                </summary>
+                <div class="route-grid">
+                  <label>
+                    作文批改
+                    <select id="gradingModelRoute"></select>
+                  </label>
+                  <label>
+                    全文润色
+                    <select id="polishModelRoute"></select>
+                  </label>
+                </div>
+              </details>
+              <div class="ocr-config-box">
+                <div class="editor-title-row">
+                  <span class="field-label">图片文字读取</span>
+                  <span class="status-chip pending" id="ocrModelStatus">需视觉模型</span>
+                </div>
+                <div class="form-grid model-form-grid">
+                  <label>
+                    读取模式
+                    <select id="ocrModeSelect">
+                      <option value="enhanced">视觉识别 + 模型校对</option>
+                      <option value="fast">仅图片识别</option>
+                    </select>
+                  </label>
+                  <label>
+                    视觉服务商
+                    <select id="ocrProviderSelect"></select>
+                  </label>
+                  <label>
+                    视觉模型
+                    <select id="ocrDedicatedModelSelect"></select>
+                  </label>
+                </div>
+                <div class="form-grid model-form-grid wide">
+                  <label>
+                    视觉 Base URL
+                    <input class="config-input" id="ocrBaseUrlInput" type="url" />
+                  </label>
+                  <label>
+                    视觉 API Key
+                    <input class="config-input" id="ocrApiKeyInput" type="password" placeholder="Kimi API Key" />
+                  </label>
+                </div>
+                <label class="checkbox-row tls-row">
+                  <input id="ocrAllowInsecureTlsInput" type="checkbox" />
+                  <span>本地开发：视觉读取忽略 TLS 证书校验</span>
+                </label>
+                <div class="form-grid model-form-grid">
+                  <label>
+                    校对服务商
+                    <select id="ocrJudgeProviderSelect"></select>
+                  </label>
+                  <label>
+                    校对模型
+                    <select id="ocrJudgeModelSelect"></select>
+                  </label>
+                </div>
+                <div class="form-grid model-form-grid wide">
+                  <label>
+                    校对 Base URL
+                    <input class="config-input" id="ocrJudgeBaseUrlInput" type="url" />
+                  </label>
+                  <label>
+                    校对 API Key
+                    <input class="config-input" id="ocrJudgeApiKeyInput" type="password" placeholder="留空时可复用主 DeepSeek Key" />
+                  </label>
+                </div>
+                <label class="checkbox-row tls-row">
+                  <input id="ocrJudgeAllowInsecureTlsInput" type="checkbox" />
+                  <span>本地开发：校对模型忽略 TLS 证书校验</span>
+                </label>
+              </div>
+              <label class="checkbox-row tls-row">
+                <input id="allowInsecureTlsInput" type="checkbox" />
+                <span>本地开发：忽略 TLS 证书校验</span>
+              </label>
+              <div class="input-actions">
+                <button class="secondary-button" type="button" id="testModelButton">测试连接</button>
+                <button class="secondary-button" type="button" id="testOcrModelButton">测试视觉连接</button>
+                <button class="secondary-button" type="button" id="testOcrJudgeButton">测试校对连接</button>
+                <button class="primary-button" type="button" id="saveModelButton">保存模型配置</button>
+              </div>
+            </div>
+
+            <div class="module-block">
+              <div class="module-heading">
+                <div>
+                  <p class="eyebrow">生成链路</p>
+                  <h3>报告生成能力</h3>
+                </div>
+              </div>
+              <div class="capability-list">
+                <div>
+                  <strong>结构化输出</strong>
+                  <p>要求检测、四维评分、原文点评、结构升格、全文润色分模块返回。</p>
+                </div>
+                <div>
+                  <strong>可替换模型</strong>
+                  <p>同一套报告 schema，可切换不同服务商或私有化模型。</p>
+                </div>
+                <div>
+                  <strong>服务端保密</strong>
+                  <p>真实产品中 API Key 只保存在服务端，前端只显示模型名称和状态。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

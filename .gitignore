@@ -1,0 +1,7 @@
+backend/data/
+node_modules/
+.DS_Store
+.doubao-automation-profile/
+.local-server.pid
+*.log
+*.zip

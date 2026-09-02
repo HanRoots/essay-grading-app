@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>作文拍照提交</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="capture-page">
+    <main class="capture-shell">
+      <header class="capture-header">
+        <div>
+          <p class="eyebrow">手机端采集</p>
+          <h1>作文拍照提交</h1>
+        </div>
+        <a class="icon-button" href="index.html" title="返回批改台" aria-label="返回批改台">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </a>
+      </header>
+
+      <section class="capture-card">
+        <div class="capture-connection" id="captureConnection" hidden></div>
+        <div class="capture-field-grid">
+          <label>
+            学生
+            <input class="capture-input" id="captureStudent" type="text" placeholder="请输入学生姓名或班级姓名" />
+          </label>
+          <label>
+            作文任务
+            <select id="captureTask">
+              <option value="">请选择作文任务</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="camera-drop" for="capturePhotoInput">
+          <input id="capturePhotoInput" type="file" accept="image/*" capture="environment" />
+          <span>
+            <span class="camera-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M7 7h10l1.5 2H21v10H3V9h2.5L7 7Z" />
+                <circle cx="12" cy="14" r="3.2" />
+              </svg>
+            </span>
+            <strong>拍照上传作文图片</strong>
+            <small>进入相机后请点击白色圆形快门；如果要选已有照片，请点下方“从相册选择”。</small>
+          </span>
+        </label>
+        <input class="capture-file-input" id="captureAlbumInput" type="file" accept="image/*" multiple />
+
+        <div class="thumb-grid" id="captureThumbGrid" aria-label="已选择照片"></div>
+
+        <div class="capture-actions">
+          <label class="secondary-button" for="capturePhotoInput">继续拍照</label>
+          <label class="secondary-button" for="captureAlbumInput">从相册选择</label>
+          <button class="capture-button" type="button" id="submitCaptureButton">提交到 Web</button>
+        </div>
+
+        <div class="capture-result" id="captureResult"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
