@@ -4038,10 +4038,11 @@ textarea::placeholder {
   line-height: 1.2;
 }
 
-.task-panel-heading-actions {
+.task-panel-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .task-panel-close {
@@ -4051,18 +4052,21 @@ textarea::placeholder {
 }
 
 .task-new-button {
-  width: auto;
+  flex: 0 0 68px;
+  width: 68px;
   min-width: 68px;
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 6px;
   font-size: 13px;
   font-weight: 800;
 }
 
 .task-filter-list {
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
   gap: 3px;
   padding: 3px;
   border: 1px solid #e2e8f0;
@@ -4113,7 +4117,7 @@ textarea::placeholder {
   border-radius: 5px;
   background: transparent;
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 750;
   white-space: nowrap;
 }

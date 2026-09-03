@@ -24,7 +24,11 @@ cp "$ROOT_DIR/backend/"*.js "$BUILD_DIR/backend/"
 
 cd "$BUILD_DIR"
 echo "正在安装阿里云 OSS 依赖..."
-NODE_USE_SYSTEM_CA=1 npm install --omit=dev --ignore-scripts
+if [[ -f /etc/ssl/cert.pem ]]; then
+  NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem npm install --omit=dev --ignore-scripts
+else
+  NODE_USE_SYSTEM_CA=1 npm install --omit=dev --ignore-scripts
+fi
 
 echo "正在生成函数计算代码包..."
 zip -qry "$ZIP_FILE" . -x "*.DS_Store" "__MACOSX/*"

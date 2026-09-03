@@ -55,25 +55,25 @@
             <h2>作文任务</h2>
             <span class="count-pill" id="queueCount">0</span>
           </div>
-          <div class="task-panel-heading-actions">
-            <button class="primary-button task-new-button" type="button" id="newTaskButton">+ 新建</button>
-            <button class="icon-button task-panel-close" type="button" id="closeTaskPanelButton" title="收起任务列表" aria-label="收起任务列表">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m15 18-6-6 6-6" />
-              </svg>
+          <button class="icon-button task-panel-close" type="button" id="closeTaskPanelButton" title="收起任务列表" aria-label="收起任务列表">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+        </div>
+        <div class="task-panel-toolbar">
+          <button class="primary-button task-new-button" type="button" id="newTaskButton">+ 新建</button>
+          <div class="task-filter-list" role="tablist" aria-label="任务筛选">
+            <button class="task-filter-button active" type="button" role="tab" aria-selected="true" data-task-filter="all">
+              全部 <span data-task-filter-count="all">0</span>
+            </button>
+            <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="pending">
+              待处理 <span data-task-filter-count="pending">0</span>
+            </button>
+            <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="done">
+              完成 <span data-task-filter-count="done">0</span>
             </button>
           </div>
-        </div>
-        <div class="task-filter-list" role="tablist" aria-label="任务筛选">
-          <button class="task-filter-button active" type="button" role="tab" aria-selected="true" data-task-filter="all">
-            全部 <span data-task-filter-count="all">0</span>
-          </button>
-          <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="pending">
-            待处理 <span data-task-filter-count="pending">0</span>
-          </button>
-          <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="done">
-            已完成 <span data-task-filter-count="done">0</span>
-          </button>
         </div>
         <div class="queue-list" id="queueList"></div>
         <button class="queue-clear-button task-clear-button" type="button" id="clearQueueButton">清空全部任务</button>
