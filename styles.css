@@ -3973,7 +3973,7 @@ textarea::placeholder {
 /* Multi-task workspace */
 :root {
   --task-panel-width: 276px;
-  --app-header-height: 72px;
+  --app-header-height: 76px;
 }
 
 .app-shell {
@@ -3988,9 +3988,80 @@ textarea::placeholder {
 .sidebar {
   grid-column: 1 / -1;
   grid-row: 1;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(320px, 1fr);
   min-height: var(--app-header-height);
   padding: 12px 22px;
+}
+
+.ai-recognition-prompt {
+  justify-self: end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: min(720px, 100%);
+  min-width: 0;
+  padding: 7px 8px 7px 12px;
+  border-left: 3px solid #2563eb;
+  border-radius: 4px;
+  background: #eef4ff;
+}
+
+.ai-recognition-prompt p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ai-prompt-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #fff;
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ai-prompt-copy-button:hover,
+.ai-prompt-copy-button:focus-visible {
+  border-color: #60a5fa;
+  background: #dbeafe;
+  outline: none;
+}
+
+.ai-prompt-copy-button.copied {
+  border-color: #86efac;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ai-prompt-copy-button:disabled {
+  cursor: default;
+}
+
+.ai-prompt-copy-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .queue-panel {
@@ -4325,7 +4396,14 @@ body.task-panel-collapsed .queue-panel {
   }
 
   .sidebar {
+    grid-template-columns: auto minmax(0, 1fr);
     min-height: 0;
+  }
+
+  .ai-recognition-prompt {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    width: 100%;
   }
 
   .queue-panel,
@@ -4379,6 +4457,10 @@ body.task-panel-collapsed .queue-panel {
     grid-template-columns: 1fr;
   }
 
+  .ai-recognition-prompt {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
   .task-panel-toggle {
     grid-column: auto;
   }
@@ -4391,7 +4473,8 @@ body.task-panel-collapsed .queue-panel {
 @media print {
   .queue-panel,
   .task-panel-toggle,
-  .task-panel-scrim {
+  .task-panel-scrim,
+  .ai-recognition-prompt {
     display: none !important;
   }
 

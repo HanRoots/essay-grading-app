@@ -24,6 +24,7 @@ const DEFAULT_GRADING_HINT = [
   "点评要具体、客观，指出原句位置、问题原因和可执行修改建议。",
   "不要套模板，不要拔高孩子思想；润色要保留孩子原有想法和语言水平。"
 ].join("\n");
+const AI_RECOGNITION_PROMPT = "请识别孩子手写的作文，只输出识别出的原文。绝对不要添加、删减或修改任何内容，不要提供批改意见。请忽略红笔文字，并按不同同学分别整理输出。";
 const DEFAULT_CUSTOM_PROMPT_REQUIREMENTS = [
   "围绕题目写清楚主要内容",
   "内容具体，语句通顺，表达真实",
@@ -211,6 +212,7 @@ async function initDesktopPage() {
 }
 
 function bindDesktopEvents() {
+  $("#copyAiRecognitionPromptButton")?.addEventListener("click", copyAiRecognitionPrompt);
   $("#gradeSelect").addEventListener("change", () => {
     populateBookSelect();
     populateUnitSelect();
@@ -663,6 +665,30 @@ async function copyCaptureUrl() {
         button.disabled = false;
       }, 1200);
     }
+  }
+}
+
+async function copyAiRecognitionPrompt() {
+  const button = $("#copyAiRecognitionPromptButton");
+  const label = button?.querySelector("span");
+  if (!button || !label) return;
+  const previousText = label.textContent;
+  let copied = false;
+  try {
+    button.disabled = true;
+    await copyTextToClipboard(AI_RECOGNITION_PROMPT);
+    copied = true;
+    button.classList.add("copied");
+    label.textContent = "已复制";
+    setGradingStatus("AI 识别提示语已复制", "success");
+  } catch (error) {
+    window.prompt?.("请复制 AI 识别提示语", AI_RECOGNITION_PROMPT);
+  } finally {
+    window.setTimeout(() => {
+      label.textContent = previousText;
+      button.classList.remove("copied");
+      button.disabled = false;
+    }, copied ? 1400 : 0);
   }
 }
 

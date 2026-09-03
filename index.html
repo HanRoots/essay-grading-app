@@ -47,6 +47,17 @@
           </button>
         </nav>
 
+        <div class="ai-recognition-prompt" aria-label="AI 作文识别提示语">
+          <p id="aiRecognitionPrompt">请识别孩子手写的作文，只输出识别出的原文。绝对不要添加、删减或修改任何内容，不要提供批改意见。请忽略红笔文字，并按不同同学分别整理输出。</p>
+          <button class="ai-prompt-copy-button" id="copyAiRecognitionPromptButton" type="button" aria-describedby="aiRecognitionPrompt" title="复制 AI 识别提示语">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="8" y="8" width="11" height="11" rx="2" />
+              <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+            </svg>
+            <span>复制提示语</span>
+          </button>
+        </div>
+
       </aside>
 
       <section class="queue-panel" id="taskPanel" aria-label="作文任务中心">
