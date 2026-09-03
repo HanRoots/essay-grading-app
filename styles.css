@@ -3969,3 +3969,63 @@ textarea::placeholder {
     font-weight: 400 !important;
   }
 }
+.cloud-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.cloud-login-dialog {
+  display: grid;
+  gap: 18px;
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+}
+
+.cloud-login-dialog h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.cloud-login-dialog label {
+  display: grid;
+  gap: 8px;
+  color: #5f7089;
+  font-weight: 700;
+}
+
+.cloud-login-dialog input {
+  min-width: 0;
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid #cfdbea;
+  border-radius: 6px;
+  color: #162033;
+  background: #ffffff;
+  font: inherit;
+}
+
+.cloud-login-dialog input:focus {
+  border-color: #2f67ea;
+  outline: 3px solid rgba(47, 103, 234, 0.14);
+}
+
+.cloud-login-note {
+  margin: 0;
+  color: #6c7d94;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.cloud-login-actions {
+  display: flex;
+  justify-content: flex-end;
+}

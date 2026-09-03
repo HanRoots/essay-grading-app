@@ -3,6 +3,7 @@
 ## 上线后的结构
 
 - **阿里云函数计算 FC Web 函数**：运行网页和 `/api/*`，无需购买或维护云服务器。
+- **GitHub Pages**：正式访问时托管静态网页，避免 FC 默认测试域名强制下载 HTML；网页通过 HTTPS 调用 FC API。
 - **私有 OSS Bucket**：保存任务状态、作文原图和预览图。
 - **浏览器直传 OSS**：上传图片时先向 FC 获取短期签名，再把每一页原图直接传入 OSS，避免图片经过函数计算造成超时或请求过大。
 - **模型 API**：FC 在服务端调用 DeepSeek、Kimi 等模型；API Key 不发送给浏览器，也不写入 OSS 状态文件。
@@ -80,15 +81,16 @@ OSS_SIGNED_URL_TTL_SECONDS=21600
 DEEPSEEK_API_KEY=你的DeepSeek密钥
 KIMI_API_KEY=你的Kimi密钥
 TZ=Asia/Shanghai
+CORS_ALLOWED_ORIGINS=https://你的GitHub用户名.github.io
 ```
 
 只配置实际使用的模型密钥即可。网页中的 API Key 输入框在云端模式会锁定，避免老师误把密钥保存在浏览器或任务数据中。
 
 ## 六、创建公网入口并检查
 
-1. 创建 HTTP 触发器，允许匿名 HTTP 调用。应用自身会弹出教师账号密码框。
+1. 创建 HTTP 触发器，允许匿名 HTTP 调用。应用 API 仍要求教师账号密码。
 2. 使用 HTTPS 的 FC 公网域名访问 `/api/health`，应看到 `"ok": true`。
-3. 打开根地址并输入 `APP_USERNAME`、`APP_PASSWORD`。
+3. 将静态网页发布到 GitHub Pages，并在 `runtime-config.js` 中填写 FC API 地址。打开 Pages 地址后输入 `APP_USERNAME`、`APP_PASSWORD`。
 4. 在模型配置页测试文字模型和视觉模型。
 5. 用手机打开同一公网地址的 `/capture.html`，提交 2 页以上作文图片。
 6. 在电脑端确认任务出现、所有图片可载入、识别和批改可完成。

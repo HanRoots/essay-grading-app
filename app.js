@@ -8,6 +8,9 @@ const CAPTURE_DRAFT_STORE = "drafts";
 const CAPTURE_DRAFT_ID = "active";
 const CAPTURE_DRAFT_META_KEY = "essayCaptureDraftMeta";
 const APP_RUNTIME_STORAGE_KEY = "essayAppRuntimeSessionId";
+const API_AUTH_SESSION_KEY = "essayApiAuthorization";
+const APP_DEPLOYMENT_CONFIG = window.ESSAY_APP_CONFIG || {};
+const API_BASE_URL = String(APP_DEPLOYMENT_CONFIG.apiBaseUrl || "").replace(/\/+$/, "");
 const ROUTE_FOLLOW_VALUE = "__follow_main__";
 const GRADING_HINT_STORAGE_KEY = "essayGradingCustomHint";
 const OCR_IMAGE_KEEP_ORIGINAL_MAX_BYTES = 16 * 1024 * 1024;
@@ -125,6 +128,7 @@ const state = {
   annotationDragClickSuppressed: false,
   activeAnnotationIndex: "",
   currentImages: [],
+  apiLoginPromise: null,
   ocrText: "",
   gradingHint: DEFAULT_GRADING_HINT,
   customPrompt: createDefaultCustomPrompt(false),
@@ -465,7 +469,13 @@ async function handleBackendRuntimeSession(runtime) {
 async function loadNetworkInfo() {
   try {
     const info = await apiRequest("/api/network-info");
-    state.networkInfo = info;
+    state.networkInfo = API_BASE_URL
+      ? {
+          ...info,
+          captureUrl: new URL("capture.html", window.location.href).href,
+          captureUrls: [new URL("capture.html", window.location.href).href]
+        }
+      : info;
     renderCaptureShareInfo();
     renderCaptureConnectionInfo();
   } catch (error) {
@@ -627,14 +637,21 @@ function shouldAutoOpenIncomingSubmission(currentLocal, currentStillExists, inco
 }
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
+  const authorization = readApiAuthorization();
+  const response = await fetch(buildApiUrl(path), {
     method: options.method || "GET",
     headers: {
-      "Content-Type": "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(authorization ? { Authorization: authorization } : {}),
       ...(options.headers || {})
     },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
+  if (response.status === 401 && options.retryAuth !== false) {
+    clearApiAuthorization();
+    await requestApiCredentials();
+    return apiRequest(path, { ...options, retryAuth: false });
+  }
   if (!response.ok) {
     const raw = await response.text();
     let message = raw;
@@ -647,6 +664,88 @@ async function apiRequest(path, options = {}) {
     throw new Error(message || `API error ${response.status}`);
   }
   return response.json();
+}
+
+function buildApiUrl(path) {
+  if (!API_BASE_URL || !String(path).startsWith("/api/")) return path;
+  return `${API_BASE_URL}${path}`;
+}
+
+function readApiAuthorization() {
+  try {
+    return window.sessionStorage.getItem(API_AUTH_SESSION_KEY) || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function saveApiAuthorization(value) {
+  try {
+    window.sessionStorage.setItem(API_AUTH_SESSION_KEY, value);
+  } catch (error) {
+    // The current tab can continue even when session storage is unavailable.
+  }
+}
+
+function clearApiAuthorization() {
+  try {
+    window.sessionStorage.removeItem(API_AUTH_SESSION_KEY);
+  } catch (error) {
+    // Ignore storage failures.
+  }
+}
+
+function encodeBasicAuthorization(username, password) {
+  const bytes = new TextEncoder().encode(`${username}:${password}`);
+  let binary = "";
+  bytes.forEach((value) => {
+    binary += String.fromCharCode(value);
+  });
+  return `Basic ${window.btoa(binary)}`;
+}
+
+function requestApiCredentials() {
+  if (state.apiLoginPromise) return state.apiLoginPromise;
+  state.apiLoginPromise = new Promise((resolve, reject) => {
+    const overlay = document.createElement("div");
+    overlay.className = "cloud-login-overlay";
+    overlay.innerHTML = `
+      <form class="cloud-login-dialog" aria-label="教师登录">
+        <div>
+          <p class="eyebrow">云端批改台</p>
+          <h2>教师登录</h2>
+        </div>
+        <label>
+          用户名
+          <input name="username" type="text" value="teacher" autocomplete="username" required />
+        </label>
+        <label>
+          密码
+          <input name="password" type="password" autocomplete="current-password" required autofocus />
+        </label>
+        <p class="cloud-login-note">账号只保留在当前浏览器标签页，关闭后需要重新登录。</p>
+        <div class="cloud-login-actions">
+          <button class="primary-button" type="submit">登录</button>
+        </div>
+      </form>
+    `;
+    const form = overlay.querySelector("form");
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const username = String(data.get("username") || "teacher").trim();
+      const password = String(data.get("password") || "");
+      if (!password) return;
+      saveApiAuthorization(encodeBasicAuthorization(username, password));
+      overlay.remove();
+      resolve();
+    });
+    document.body.appendChild(overlay);
+    window.setTimeout(() => overlay.querySelector('input[name="password"]')?.focus(), 0);
+  }).finally(() => {
+    state.apiLoginPromise = null;
+  });
+  return state.apiLoginPromise;
 }
 
 function usesDirectOssUploads() {
@@ -3697,8 +3796,16 @@ function persistCurrentQueueItemOnPageHide() {
   const item = getCurrentQueueItem();
   if (!state.backendAvailable || !item || item.id.startsWith(LOCAL_DRAFT_ID_PREFIX)) return;
   const payload = JSON.stringify(buildSubmissionPayload(item));
-  const blob = new Blob([payload], { type: "application/json" });
-  navigator.sendBeacon?.(`/api/submissions/${encodeURIComponent(item.id)}/autosave`, blob);
+  const authorization = readApiAuthorization();
+  window.fetch(buildApiUrl(`/api/submissions/${encodeURIComponent(item.id)}/autosave`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(authorization ? { Authorization: authorization } : {})
+    },
+    body: payload,
+    keepalive: true
+  }).catch(() => {});
 }
 
 async function filesToImagePayload(fileList, limit = MAX_IMAGE_PAGES) {

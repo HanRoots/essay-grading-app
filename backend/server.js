@@ -30,7 +30,7 @@ const STARTUP_READY = RESET_WORKSPACE_ON_START
       return result;
     })
   : Promise.resolve(null);
-const PUBLIC_FILES = new Set(["/", "/index.html", "/capture.html", "/styles.css", "/app.js"]);
+const PUBLIC_FILES = new Set(["/", "/index.html", "/capture.html", "/styles.css", "/runtime-config.js", "/app.js"]);
 const MAX_IMAGE_PAGES = 12;
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024;
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
@@ -48,6 +48,7 @@ const MIME_TYPES = {
 const server = http.createServer(async (req, res) => {
   try {
     await STARTUP_READY;
+    if (!applyCors(req, res)) return;
     if (!ensureAuthorized(req, res)) return;
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
@@ -546,6 +547,33 @@ function getRequestOrigin(req) {
   const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
   const protocol = forwardedProto || (req.socket.encrypted ? "https" : "http");
   return `${protocol}://${host}`;
+}
+
+function applyCors(req, res) {
+  const origin = String(req.headers.origin || "").trim();
+  const allowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  const normalizedOrigin = origin.replace(/\/$/, "");
+  const originAllowed = Boolean(origin && allowedOrigins.includes(normalizedOrigin));
+
+  if (originAllowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Max-Age", "600");
+    res.setHeader("Vary", "Origin");
+  }
+
+  if (req.method !== "OPTIONS") return true;
+  if (!originAllowed) {
+    sendJson(res, 403, { error: "cors_origin_denied", message: "当前网页来源未被允许访问批改服务" });
+    return false;
+  }
+  res.writeHead(204);
+  res.end();
+  return false;
 }
 
 function ensureAuthorized(req, res) {
