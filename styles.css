@@ -4072,6 +4072,7 @@ textarea::placeholder {
   grid-row: 2;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 14px;
   width: var(--task-panel-width);
   height: calc(100vh - var(--app-header-height));
@@ -4107,6 +4108,57 @@ textarea::placeholder {
   color: #0f172a;
   font-size: 17px;
   line-height: 1.2;
+}
+
+.teacher-profile-control {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.teacher-profile-control > label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.teacher-profile-control > span {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.teacher-profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+}
+
+.teacher-profile-row select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 30px 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.teacher-profile-edit {
+  width: 34px;
+  height: 34px;
+}
+
+.teacher-profile-edit svg {
+  width: 17px;
+  height: 17px;
 }
 
 .task-panel-toolbar {
@@ -4302,7 +4354,22 @@ textarea::placeholder {
 }
 
 .queue-panel .queue-task-status {
+  margin-top: 0;
+}
+
+.queue-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   margin-top: 7px;
+}
+
+.queue-item-footer small {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .task-filter-empty {

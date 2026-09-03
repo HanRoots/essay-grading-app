@@ -9,6 +9,13 @@ const CAPTURE_DRAFT_ID = "active";
 const CAPTURE_DRAFT_META_KEY = "essayCaptureDraftMeta";
 const APP_RUNTIME_STORAGE_KEY = "essayAppRuntimeSessionId";
 const API_AUTH_SESSION_KEY = "essayApiAuthorization";
+const TEACHER_PROFILE_STORAGE_KEY = "essayActiveTeacherId";
+const DEFAULT_TEACHER_PROFILES = [
+  { id: "teacher-1", name: "教师 1" },
+  { id: "teacher-2", name: "教师 2" },
+  { id: "teacher-3", name: "教师 3" }
+];
+const DEFAULT_TASK_RETENTION_DAYS = 15;
 const APP_DEPLOYMENT_CONFIG = window.ESSAY_APP_CONFIG || {};
 const API_BASE_URL = String(APP_DEPLOYMENT_CONFIG.apiBaseUrl || "").replace(/\/+$/, "");
 const ROUTE_FOLLOW_VALUE = "__follow_main__";
@@ -131,6 +138,10 @@ const state = {
   currentImages: [],
   gradingJobs: new Map(),
   taskFilter: "all",
+  teacherId: readStoredTeacherId(),
+  teacherProfiles: [...DEFAULT_TEACHER_PROFILES],
+  taskRetentionDays: DEFAULT_TASK_RETENTION_DAYS,
+  switchingTeacher: false,
   apiLoginPromise: null,
   ocrText: "",
   gradingHint: DEFAULT_GRADING_HINT,
@@ -193,6 +204,7 @@ function redirectFilePageToLocalServer() {
 
 async function initDesktopPage() {
   await loadBackendBootstrap();
+  renderTeacherProfiles();
   renderQueue();
   renderLibraryTable();
   populateGradeSelect();
@@ -232,6 +244,8 @@ function bindDesktopEvents() {
   $("#essayInput").addEventListener("input", handleEssayTextInput);
   $("#generateButton").addEventListener("click", startCurrentTaskGrading);
   $("#newTaskButton").addEventListener("click", createNewTextTask);
+  $("#teacherProfileSelect")?.addEventListener("change", handleTeacherProfileChange);
+  $("#renameTeacherProfileButton")?.addEventListener("click", renameCurrentTeacherProfile);
   $("#toggleTaskPanelButton").addEventListener("click", toggleTaskPanel);
   $("#closeTaskPanelButton").addEventListener("click", closeTaskPanel);
   $("#taskPanelScrim").addEventListener("click", closeTaskPanel);
@@ -560,6 +574,12 @@ async function loadBackendBootstrap() {
     if (Array.isArray(data.queueItems)) {
       queueItems.splice(0, queueItems.length, ...data.queueItems);
     }
+    if (Array.isArray(data.teacherProfiles) && data.teacherProfiles.length) {
+      state.teacherProfiles = data.teacherProfiles;
+    }
+    state.teacherId = data.activeTeacherId || state.teacherId || state.teacherProfiles[0]?.id || "teacher-1";
+    state.taskRetentionDays = Number(data.runtime?.taskRetentionDays || DEFAULT_TASK_RETENTION_DAYS);
+    saveStoredTeacherId(state.teacherId);
     if (data.modelConfig) {
       state.modelConfig = {
         ...state.modelConfig,
@@ -698,8 +718,10 @@ function startQueuePolling() {
 }
 
 async function refreshQueueFromBackend() {
+  const requestedTeacherId = state.teacherId;
   try {
     const items = await apiRequest("/api/submissions");
+    if (requestedTeacherId !== state.teacherId || state.switchingTeacher) return;
     mergeQueueFromServer(Array.isArray(items) ? items : []);
     state.backendAvailable = true;
   } catch (error) {
@@ -802,6 +824,7 @@ async function apiRequest(path, options = {}) {
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(authorization ? { Authorization: authorization } : {}),
+      ...(state.teacherId ? { "X-Teacher-Id": state.teacherId } : {}),
       ...(options.headers || {})
     },
     body: options.body ? JSON.stringify(options.body) : undefined
@@ -851,6 +874,22 @@ function clearApiAuthorization() {
     window.sessionStorage.removeItem(API_AUTH_SESSION_KEY);
   } catch (error) {
     // Ignore storage failures.
+  }
+}
+
+function readStoredTeacherId() {
+  try {
+    return window.localStorage.getItem(TEACHER_PROFILE_STORAGE_KEY) || "teacher-1";
+  } catch (error) {
+    return "teacher-1";
+  }
+}
+
+function saveStoredTeacherId(teacherId) {
+  try {
+    window.localStorage.setItem(TEACHER_PROFILE_STORAGE_KEY, teacherId);
+  } catch (error) {
+    // The current tab can continue without remembering the selected teacher.
   }
 }
 
@@ -1384,12 +1423,16 @@ function renderQueue() {
   $("#queueList").innerHTML = visibleItems.length ? visibleItems.map((item) => {
     const status = statuses.get(item.id);
     const attachment = Number(item.images || 0) ? ` · ${Number(item.images)} 张附件` : "";
+    const retention = formatTaskRetention(item);
     return `
       <article class="queue-item ${item.id === state.currentQueueId ? "active" : ""}" data-id="${item.id}">
         <button class="queue-item-main" type="button" data-task-open-id="${item.id}">
           <strong>${escapeHTML(item.student || "未命名学生")}</strong>
           <span>${escapeHTML(item.meta || "未设置任务")}${attachment}</span>
-          <em class="queue-task-status ${status.tone}">${status.label}</em>
+          <div class="queue-item-footer">
+            <em class="queue-task-status ${status.tone}">${status.label}</em>
+            <small>${escapeHTML(retention)}</small>
+          </div>
         </button>
         <button class="queue-close" type="button" data-close-id="${item.id}" aria-label="删除任务 ${escapeHTML(item.student || "未命名学生")}" title="删除任务">×</button>
       </article>
@@ -1413,6 +1456,86 @@ function renderQueue() {
     });
   });
   syncTaskPanelControls();
+}
+
+function renderTeacherProfiles() {
+  const select = $("#teacherProfileSelect");
+  if (!select) return;
+  select.innerHTML = state.teacherProfiles.map((profile) => (
+    `<option value="${escapeHTML(profile.id)}">${escapeHTML(profile.name)}</option>`
+  )).join("");
+  if (!state.teacherProfiles.some((profile) => profile.id === state.teacherId)) {
+    state.teacherId = state.teacherProfiles[0]?.id || "teacher-1";
+  }
+  select.value = state.teacherId;
+  select.disabled = state.switchingTeacher;
+  $("#renameTeacherProfileButton").disabled = state.switchingTeacher;
+  $("#retentionPolicyLabel").textContent = `任务保留 ${state.taskRetentionDays} 天`;
+}
+
+async function handleTeacherProfileChange(event) {
+  const nextTeacherId = String(event.target.value || "");
+  if (!nextTeacherId || nextTeacherId === state.teacherId || state.switchingTeacher) return;
+  const previousTeacherId = state.teacherId;
+  state.switchingTeacher = true;
+  renderTeacherProfiles();
+  try {
+    await flushAutosavesBeforeGrading();
+    state.teacherId = nextTeacherId;
+    saveStoredTeacherId(nextTeacherId);
+    const items = await apiRequest("/api/submissions");
+    queueItems.splice(0, queueItems.length, ...(Array.isArray(items) ? items : []));
+    state.currentQueueId = "";
+    state.currentImages = [];
+    state.ocrText = "";
+    state.currentReport = null;
+    state.customPrompt = createDefaultCustomPrompt(false);
+    if (queueItems.length) loadQueueItem(queueItems[0].id);
+    else renderAfterQueueRemoval(true, 0);
+    setGradingStatus(`已切换到${getCurrentTeacherProfile()?.name || "当前教师"}`, "success");
+  } catch (error) {
+    state.teacherId = previousTeacherId;
+    saveStoredTeacherId(previousTeacherId);
+    setGradingStatus(error.message || "切换教师失败", "pending");
+  } finally {
+    state.switchingTeacher = false;
+    renderTeacherProfiles();
+  }
+}
+
+async function renameCurrentTeacherProfile() {
+  const profile = getCurrentTeacherProfile();
+  if (!profile || state.switchingTeacher) return;
+  const requestedName = window.prompt("请输入教师名称", profile.name);
+  if (requestedName === null) return;
+  const name = requestedName.trim().replace(/\s+/g, " ").slice(0, 24);
+  if (!name || name === profile.name) return;
+  try {
+    const saved = await apiRequest(`/api/teacher-profiles/${encodeURIComponent(profile.id)}`, {
+      method: "PUT",
+      body: { name }
+    });
+    profile.name = saved.name;
+    renderTeacherProfiles();
+    setGradingStatus("教师名称已保存", "success");
+  } catch (error) {
+    setGradingStatus(error.message || "教师名称保存失败", "pending");
+  }
+}
+
+function getCurrentTeacherProfile() {
+  return state.teacherProfiles.find((profile) => profile.id === state.teacherId) || state.teacherProfiles[0] || null;
+}
+
+function formatTaskRetention(item) {
+  const expiresAt = Date.parse(item.expiresAt || "");
+  const fallbackUpdatedAt = Date.parse(item.updatedAt || item.createdAt || "");
+  const resolvedExpiry = Number.isFinite(expiresAt)
+    ? expiresAt
+    : fallbackUpdatedAt + state.taskRetentionDays * 24 * 60 * 60 * 1000;
+  if (!Number.isFinite(resolvedExpiry)) return `保留 ${state.taskRetentionDays} 天`;
+  const remainingDays = Math.max(1, Math.ceil((resolvedExpiry - Date.now()) / (24 * 60 * 60 * 1000)));
+  return `剩余 ${remainingDays} 天`;
 }
 
 function getQueueTaskStatus(item) {
@@ -3803,7 +3926,11 @@ function syncCurrentQueueItem(fields, options = {}) {
     if (!shouldCreateDraftForFields(fields)) return;
     item = createLocalQueueDraft(fields);
   }
-  Object.assign(item, fields, { updatedAt: new Date().toISOString() });
+  const updatedAt = new Date().toISOString();
+  Object.assign(item, fields, {
+    updatedAt,
+    expiresAt: new Date(Date.parse(updatedAt) + state.taskRetentionDays * 24 * 60 * 60 * 1000).toISOString()
+  });
   if (Object.prototype.hasOwnProperty.call(fields, "imageData")) {
     item.imageData = normalizeClientImages(fields.imageData || []);
     item.imageMeta = item.imageData.map(toClientImageMeta);
@@ -3834,6 +3961,7 @@ function createLocalQueueDraft(fields = {}) {
   const essay = String(fields.essay ?? fields.ocrText ?? $("#essayInput")?.value ?? "");
   const item = {
     id,
+    teacherId: state.teacherId,
     student: fields.student || getCurrentStudentName(null),
     meta: buildQueueMetaFromPrompt(prompt),
     promptId: prompt.id || "",
@@ -3853,7 +3981,8 @@ function createLocalQueueDraft(fields = {}) {
     report: fields.report || state.currentReport || null,
     status: fields.status || "draft",
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + state.taskRetentionDays * 24 * 60 * 60 * 1000).toISOString()
   };
   queueItems.unshift(item);
   state.currentQueueId = id;
@@ -3985,6 +4114,7 @@ function normalizeAutosaveFields(fields = {}) {
 function buildSubmissionPayload(item) {
   const imageData = normalizeClientImages(item.imageData || []);
   return {
+    teacherId: state.teacherId,
     student: item.student || "未命名学生",
     task: item.meta || "未设置任务",
     meta: item.meta || "未设置任务",
@@ -4015,7 +4145,8 @@ function persistCurrentQueueItemOnPageHide() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(authorization ? { Authorization: authorization } : {})
+      ...(authorization ? { Authorization: authorization } : {}),
+      ...(state.teacherId ? { "X-Teacher-Id": state.teacherId } : {})
     },
     body: payload,
     keepalive: true

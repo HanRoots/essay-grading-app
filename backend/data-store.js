@@ -3,6 +3,7 @@ const path = require("path");
 const { promptCatalog } = require("./prompt-catalog");
 const { createSeedData, modelProviders: seedModelProviders } = require("./seed-data");
 const { getObjectBuffer, isOssEnabled, putObjectBuffer } = require("./oss-storage");
+const { ensureWorkspacePolicyData } = require("./workspace-policy");
 
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "app-data.json");
@@ -214,6 +215,9 @@ function migrateData(data) {
   }
   if (!data.nextIds) {
     data.nextIds = { submission: 1, report: 1 };
+    changed = true;
+  }
+  if (ensureWorkspacePolicyData(data)) {
     changed = true;
   }
   if (data.modelConfig && typeof data.modelConfig.allowInsecureTls !== "boolean") {

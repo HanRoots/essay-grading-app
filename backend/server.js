@@ -8,6 +8,14 @@ const { findPrompt, publicModelConfig, readData, resetRuntimeWorkspaceData, upda
 const { gradeEssayReport, recognizeEssayText, testCompatibleModelConnection } = require("./model-client");
 const { normalizeModelReport } = require("./report-engine");
 const {
+  TASK_RETENTION_DAYS,
+  getTaskExpiresAt,
+  itemBelongsToTeacher,
+  normalizeTeacherName,
+  removeExpiredWorkspaceItems,
+  resolveTeacherId
+} = require("./workspace-policy");
+const {
   collectImageObjectKeys,
   createImageUploadSlots,
   deleteObjectKeys,
@@ -22,8 +30,11 @@ const PORT = Number(process.env.PORT || process.env.FC_CUSTOM_LISTEN_PORT || 878
 const ROOT_DIR = path.join(__dirname, "..");
 const SERVER_SESSION_ID = `${Date.now()}-${process.pid}`;
 const SERVER_STARTED_AT = new Date().toISOString();
+const RETENTION_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const RESET_WORKSPACE_ON_START = !isOssEnabled() && (process.env.RESET_WORKSPACE_ON_START === "1" || process.argv.includes("--reset-session"));
 let startupReset = null;
+let lastRetentionSweepAt = 0;
+let retentionSweepPromise = null;
 const STARTUP_READY = RESET_WORKSPACE_ON_START
   ? resetRuntimeWorkspaceData().then((result) => {
       startupReset = result;
@@ -84,7 +95,8 @@ function getRuntimeInfo() {
     resetOnStart: RESET_WORKSPACE_ON_START,
     resetAt: startupReset?.resetAt || "",
     storage: getStorageRuntimeInfo(),
-    serverManagedModelKeys: usesServerManagedModelKeys()
+    serverManagedModelKeys: usesServerManagedModelKeys(),
+    taskRetentionDays: TASK_RETENTION_DAYS
   };
 }
 
@@ -93,6 +105,8 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, { ok: true, time: new Date().toISOString() });
     return;
   }
+
+  await sweepExpiredWorkspaceItems();
 
   if (req.method === "GET" && url.pathname === "/api/network-info") {
     const urls = getAccessUrls(PORT);
@@ -110,13 +124,34 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
     const data = await readData();
+    const teacherId = getRequestTeacherId(req, data);
     sendJson(res, 200, {
       runtime: getRuntimeInfo(),
       promptLibrary: data.promptLibrary,
       modelProviders: data.modelProviders,
-      queueItems: data.queueItems.map(toQueueSummary),
+      teacherProfiles: data.teacherProfiles,
+      activeTeacherId: teacherId,
+      queueItems: data.queueItems.filter((item) => itemBelongsToTeacher(item, teacherId, data.teacherProfiles)).map(toQueueSummary),
       modelConfig: publicRuntimeModelConfig(data.modelConfig)
     });
+    return;
+  }
+
+  const teacherProfileMatch = url.pathname.match(/^\/api\/teacher-profiles\/([^/]+)$/);
+  if (req.method === "PUT" && teacherProfileMatch) {
+    const profileId = decodeURIComponent(teacherProfileMatch[1]);
+    const body = await readJsonBody(req);
+    const profile = await updateData((data) => {
+      const current = data.teacherProfiles.find((item) => item.id === profileId);
+      if (!current) return null;
+      current.name = normalizeTeacherName(body.name, current.name);
+      return current;
+    });
+    if (!profile) {
+      sendJson(res, 404, { error: "teacher_profile_not_found", message: "教师身份不存在" });
+      return;
+    }
+    sendJson(res, 200, profile);
     return;
   }
 
@@ -247,17 +282,25 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/submissions") {
     const data = await readData();
-    sendJson(res, 200, data.queueItems.map(toQueueSummary));
+    const teacherId = getRequestTeacherId(req, data);
+    sendJson(res, 200, data.queueItems.filter((item) => itemBelongsToTeacher(item, teacherId, data.teacherProfiles)).map(toQueueSummary));
     return;
   }
 
   if (req.method === "DELETE" && url.pathname === "/api/submissions") {
     const dataBeforeDelete = await readData();
-    const objectKeys = collectImageObjectKeys(dataBeforeDelete.queueItems);
+    const teacherId = getRequestTeacherId(req, dataBeforeDelete);
+    const teacherItems = dataBeforeDelete.queueItems.filter((item) => itemBelongsToTeacher(item, teacherId, dataBeforeDelete.teacherProfiles));
+    const objectKeys = collectImageObjectKeys(teacherItems);
     const deleted = await updateData((data) => {
-      const count = data.queueItems.length;
-      data.queueItems = [];
-      data.reports = Array.isArray(data.reports) ? [] : [];
+      const removedIds = new Set(data.queueItems
+        .filter((item) => itemBelongsToTeacher(item, teacherId, data.teacherProfiles))
+        .map((item) => item.id));
+      const count = removedIds.size;
+      data.queueItems = data.queueItems.filter((item) => !removedIds.has(item.id));
+      data.reports = (Array.isArray(data.reports) ? data.reports : []).filter((report) => (
+        !removedIds.has(report.queueId) && report.teacherId !== teacherId
+      ));
       return count;
     });
     await deleteObjectKeys(objectKeys).catch((error) => console.warn(`OSS cleanup warning: ${error.message}`));
@@ -269,10 +312,12 @@ async function handleApi(req, res, url) {
     const body = await readJsonBody(req);
     const persistedImages = await persistImageList(normalizeImageData(body.imageData));
     const submission = await updateData((data) => {
+      const teacherId = getRequestTeacherId(req, data);
       const id = `q${data.nextIds.submission++}`;
       const imageData = persistedImages;
       const item = {
         id,
+        teacherId,
         student: body.student || "未命名学生",
         meta: body.meta || body.task || "未设置任务",
         promptId: body.promptId || "",
@@ -314,7 +359,9 @@ async function handleApi(req, res, url) {
   const submissionItemMatch = url.pathname.match(/^\/api\/submissions\/([^/]+)(?:\/autosave)?$/);
   if (req.method === "GET" && submissionItemMatch && !url.pathname.endsWith("/autosave")) {
     const id = decodeURIComponent(submissionItemMatch[1]);
-    const item = (await readData()).queueItems.find((entry) => entry.id === id);
+    const data = await readData();
+    const teacherId = getRequestTeacherId(req, data);
+    const item = data.queueItems.find((entry) => entry.id === id && itemBelongsToTeacher(entry, teacherId, data.teacherProfiles));
     if (!item) {
       sendJson(res, 404, { error: "submission_not_found", message: "任务不存在或已删除" });
       return;
@@ -330,7 +377,8 @@ async function handleApi(req, res, url) {
       body.imageData = await persistImageList(normalizeImageData(body.imageData));
     }
     const updated = await updateData((data) => {
-      const item = data.queueItems.find((entry) => entry.id === id);
+      const teacherId = getRequestTeacherId(req, data);
+      const item = data.queueItems.find((entry) => entry.id === id && itemBelongsToTeacher(entry, teacherId, data.teacherProfiles));
       if (!item) return null;
       applySubmissionPatch(item, body);
       return item;
@@ -346,10 +394,14 @@ async function handleApi(req, res, url) {
   if (req.method === "DELETE" && submissionItemMatch) {
     const id = decodeURIComponent(submissionItemMatch[1]);
     const deleted = await updateData((data) => {
-      const index = data.queueItems.findIndex((item) => item.id === id);
+      const teacherId = getRequestTeacherId(req, data);
+      const index = data.queueItems.findIndex((item) => item.id === id && itemBelongsToTeacher(item, teacherId, data.teacherProfiles));
       if (index < 0) return null;
       const [item] = data.queueItems.splice(index, 1);
-      data.reports = Array.isArray(data.reports) ? data.reports.filter((report) => report.queueId !== id) : [];
+      const reportId = item.report?.id;
+      data.reports = Array.isArray(data.reports)
+        ? data.reports.filter((report) => report.queueId !== id && report.id !== reportId)
+        : [];
       return item;
     });
     if (!deleted) {
@@ -364,7 +416,10 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/ocr") {
     const body = await readJsonBody(req);
     const data = await readData();
-    const queueItem = body.queueId ? data.queueItems.find((item) => item.id === body.queueId) : null;
+    const teacherId = getRequestTeacherId(req, data);
+    const queueItem = body.queueId
+      ? data.queueItems.find((item) => item.id === body.queueId && itemBelongsToTeacher(item, teacherId, data.teacherProfiles))
+      : null;
     const images = await materializeImageList(normalizeImageData(body.images || queueItem?.imageData || []));
     if (!images.length) {
       sendJson(res, 400, { error: "no_images", message: "请先上传作文图片" });
@@ -408,7 +463,9 @@ async function handleApi(req, res, url) {
       });
       if (queueItem) {
         await updateData((nextData) => {
-          const nextItem = nextData.queueItems.find((item) => item.id === queueItem.id);
+          const nextItem = nextData.queueItems.find((item) => (
+            item.id === queueItem.id && itemBelongsToTeacher(item, teacherId, nextData.teacherProfiles)
+          ));
           if (nextItem) {
             nextItem.essay = result.text;
             nextItem.ocrText = result.text;
@@ -439,7 +496,9 @@ async function handleApi(req, res, url) {
       const partialResult = error.partialResult || {};
       if (queueItem && (partialResult.text || partialResult.pageTexts?.length)) {
         await updateData((nextData) => {
-          const nextItem = nextData.queueItems.find((item) => item.id === queueItem.id);
+          const nextItem = nextData.queueItems.find((item) => (
+            item.id === queueItem.id && itemBelongsToTeacher(item, teacherId, nextData.teacherProfiles)
+          ));
           if (nextItem) {
             nextItem.essay = partialResult.text || nextItem.essay || "";
             nextItem.ocrText = partialResult.text || nextItem.ocrText || "";
@@ -480,6 +539,7 @@ async function handleApi(req, res, url) {
       return;
     }
     const data = await readData();
+    const teacherId = getRequestTeacherId(req, data);
     const prompt = body.prompt || findPrompt(data, body.promptRef || {});
     if (!prompt) {
       sendJson(res, 404, { error: "prompt_not_found" });
@@ -488,15 +548,21 @@ async function handleApi(req, res, url) {
     const provider = data.modelProviders.find((item) => item.id === data.modelConfig.provider) || data.modelProviders[0];
     const gradingModel = data.modelConfig.routes?.grading || data.modelConfig.model || provider.models[0];
     if (body.queueId) {
-      await updateData((nextData) => {
-        const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
-        if (queueItem) {
-          queueItem.status = "grading";
-          queueItem.gradingError = "";
-          queueItem.updatedAt = new Date().toISOString();
+      const queueItem = await updateData((nextData) => {
+        const target = nextData.queueItems.find((item) => (
+          item.id === body.queueId && itemBelongsToTeacher(item, teacherId, nextData.teacherProfiles)
+        ));
+        if (target) {
+          target.status = "grading";
+          target.gradingError = "";
+          target.updatedAt = new Date().toISOString();
         }
-        return queueItem;
+        return target;
       });
+      if (!queueItem) {
+        sendJson(res, 404, { error: "submission_not_found", message: "任务不存在、已过期或不属于当前教师" });
+        return;
+      }
     }
     try {
       const modelResult = await gradeEssayReport({
@@ -531,9 +597,13 @@ async function handleApi(req, res, url) {
           modelReport: modelResult.report,
           latencyMs: modelResult.latencyMs
         });
+        report.queueId = body.queueId || "";
+        report.teacherId = teacherId;
         nextData.reports.unshift(report);
         if (body.queueId) {
-          const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
+          const queueItem = nextData.queueItems.find((item) => (
+            item.id === body.queueId && itemBelongsToTeacher(item, teacherId, nextData.teacherProfiles)
+          ));
           if (queueItem) {
             const essayUnchanged = String(queueItem.essay || "").trim() === String(body.essay || "").trim();
             if (essayUnchanged) {
@@ -555,7 +625,9 @@ async function handleApi(req, res, url) {
     } catch (error) {
       if (body.queueId) {
         await updateData((nextData) => {
-          const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
+          const queueItem = nextData.queueItems.find((item) => (
+            item.id === body.queueId && itemBelongsToTeacher(item, teacherId, nextData.teacherProfiles)
+          ));
           if (queueItem) {
             queueItem.status = "failed";
             queueItem.gradingError = String(error.message || "批改失败");
@@ -594,7 +666,7 @@ function applyCors(req, res) {
   if (originAllowed) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Teacher-Id");
     res.setHeader("Access-Control-Max-Age", "600");
     res.setHeader("Vary", "Origin");
   }
@@ -711,9 +783,33 @@ async function hydrateSubmissionForClient(item) {
   const imageData = await hydrateImageListForClient(item.imageData || []);
   return {
     ...item,
+    expiresAt: getTaskExpiresAt(item),
     imageData,
     report: item.report ? { ...item.report, sourceImages: imageData } : item.report
   };
+}
+
+function getRequestTeacherId(req, data) {
+  const requestedId = String(req.headers["x-teacher-id"] || "").trim();
+  return resolveTeacherId(requestedId, data.teacherProfiles);
+}
+
+async function sweepExpiredWorkspaceItems() {
+  const now = Date.now();
+  if (now - lastRetentionSweepAt < RETENTION_SWEEP_INTERVAL_MS) return;
+  if (retentionSweepPromise) return retentionSweepPromise;
+  lastRetentionSweepAt = now;
+  retentionSweepPromise = (async () => {
+    const snapshot = await readData();
+    const preview = removeExpiredWorkspaceItems(snapshot, now);
+    if (!preview.changed) return;
+    const removedItems = await updateData((data) => removeExpiredWorkspaceItems(data, now).removedItems);
+    const objectKeys = collectImageObjectKeys(removedItems);
+    await deleteObjectKeys(objectKeys).catch((error) => console.warn(`OSS retention cleanup warning: ${error.message}`));
+  })().finally(() => {
+    retentionSweepPromise = null;
+  });
+  return retentionSweepPromise;
 }
 
 function buildCaptureUrl(origin, urls) {
@@ -887,6 +983,7 @@ function toQueueSummary(item) {
   const imageMeta = Array.isArray(item.imageMeta) ? item.imageMeta : normalizeImageData(item.imageData).map(toImageMeta);
   return {
     id: item.id,
+    teacherId: item.teacherId,
     student: item.student || "未命名学生",
     meta: item.meta || "未设置任务",
     promptId: item.promptId || "",
@@ -907,7 +1004,8 @@ function toQueueSummary(item) {
     report: stripReportImageCopies(item.report),
     status: item.status || "pending",
     createdAt: item.createdAt || "",
-    updatedAt: item.updatedAt || ""
+    updatedAt: item.updatedAt || "",
+    expiresAt: getTaskExpiresAt(item)
   };
 }
 

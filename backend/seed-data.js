@@ -226,10 +226,17 @@ const modelConfig = {
   updatedAt: "2026-06-05T06:30:00.000Z"
 };
 
+const teacherProfiles = [
+  { id: "teacher-1", name: "教师 1" },
+  { id: "teacher-2", name: "教师 2" },
+  { id: "teacher-3", name: "教师 3" }
+];
+
 function createSeedData() {
   return {
     promptLibrary: promptCatalog,
     modelProviders,
+    teacherProfiles,
     queueItems,
     modelConfig,
     reports: [],
@@ -244,5 +251,6 @@ function createSeedData() {
 module.exports = {
   createSeedData,
   modelProviders,
-  promptLibrary: promptCatalog
+  promptLibrary: promptCatalog,
+  teacherProfiles
 };
