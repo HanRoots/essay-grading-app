@@ -181,7 +181,10 @@ function migrateData(data) {
       return catalogItem;
     }
 
-    const userEdited = existing.status === "本地已配置" || existing.status === "本地草稿";
+    const catalogVersion = Number(catalogItem.catalogVersion || 1);
+    const existingCatalogVersion = Number(existing.catalogVersion || 1);
+    const catalogUpdated = catalogVersion > existingCatalogVersion;
+    const userEdited = !catalogUpdated && (existing.status === "本地已配置" || existing.status === "本地草稿");
     const merged = userEdited
       ? {
           ...catalogItem,
