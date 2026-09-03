@@ -51,20 +51,19 @@
 
       <section class="queue-panel" id="taskPanel" aria-label="作文任务中心">
         <div class="task-panel-heading">
-          <div>
-            <p class="eyebrow">多任务</p>
-            <div class="task-panel-title-row">
-              <h2>作文任务</h2>
-              <span class="count-pill" id="queueCount">0</span>
-            </div>
+          <div class="task-panel-title-row">
+            <h2>作文任务</h2>
+            <span class="count-pill" id="queueCount">0</span>
           </div>
-          <button class="icon-button task-panel-close" type="button" id="closeTaskPanelButton" title="收起任务列表" aria-label="收起任务列表">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
+          <div class="task-panel-heading-actions">
+            <button class="primary-button task-new-button" type="button" id="newTaskButton">+ 新建</button>
+            <button class="icon-button task-panel-close" type="button" id="closeTaskPanelButton" title="收起任务列表" aria-label="收起任务列表">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <button class="primary-button task-new-button" type="button" id="newTaskButton">+ 新建作文</button>
         <div class="task-filter-list" role="tablist" aria-label="任务筛选">
           <button class="task-filter-button active" type="button" role="tab" aria-selected="true" data-task-filter="all">
             全部 <span data-task-filter-count="all">0</span>
@@ -192,9 +191,15 @@
                 <div class="ocr-review">
                   <div class="thumb-grid ocr-thumb-grid" id="ocrThumbGrid" aria-label="报告图片附件"></div>
                   <div class="input-actions">
-                    <label class="file-trigger">
+                    <label class="file-trigger report-image-trigger" title="添加仅用于报告展示的原文图片">
                       <input id="imageInput" type="file" accept="image/*" multiple />
-                      添加报告图片（可选）
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="14" rx="2" />
+                        <circle cx="9" cy="10" r="2" />
+                        <path d="m5 17 4-4 3 3 3-3 4 4" />
+                      </svg>
+                      <span>添加图片</span>
+                      <small>可选</small>
                     </label>
                     <button class="ghost-button" type="button" id="clearButton">清空</button>
                   </div>

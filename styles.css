@@ -159,7 +159,7 @@ p {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
 }
 
 .section-title-row h2 {
@@ -4005,7 +4005,7 @@ textarea::placeholder {
   width: var(--task-panel-width);
   height: calc(100vh - var(--app-header-height));
   min-width: 0;
-  padding: 20px 16px 16px;
+  padding: 14px 14px 16px;
   overflow: hidden;
   border-right: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -4025,13 +4025,7 @@ textarea::placeholder {
 
 .task-panel-heading {
   justify-content: space-between;
-  gap: 12px;
-}
-
-.task-panel-heading .eyebrow {
-  margin-bottom: 4px;
-  color: #64748b;
-  font-weight: 700;
+  gap: 8px;
 }
 
 .task-panel-title-row {
@@ -4040,8 +4034,14 @@ textarea::placeholder {
 
 .task-panel-title-row h2 {
   color: #0f172a;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.2;
+}
+
+.task-panel-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-panel-close {
@@ -4051,8 +4051,12 @@ textarea::placeholder {
 }
 
 .task-new-button {
-  width: 100%;
-  min-height: 42px;
+  width: auto;
+  min-width: 68px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
   font-weight: 800;
 }
 
@@ -4064,6 +4068,41 @@ textarea::placeholder {
   border: 1px solid #e2e8f0;
   border-radius: 7px;
   background: #eef2f7;
+}
+
+.ocr-review .input-actions {
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+
+.ocr-review .input-actions .report-image-trigger {
+  gap: 7px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.report-image-trigger svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.report-image-trigger span {
+  white-space: nowrap;
+}
+
+.report-image-trigger small {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .task-filter-button {
@@ -4338,6 +4377,10 @@ body.task-panel-collapsed .queue-panel {
 
   .task-panel-toggle {
     grid-column: auto;
+  }
+
+  .ocr-review .input-actions {
+    grid-template-columns: minmax(0, 1fr) 92px;
   }
 }
 
