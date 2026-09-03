@@ -47,16 +47,39 @@
           </button>
         </nav>
 
-        <section class="queue-panel" aria-label="待处理队列">
-          <div class="section-title-row">
-            <h2>待处理</h2>
-            <span class="count-pill" id="queueCount">0</span>
-            <button class="queue-new-button" type="button" id="newTaskButton">+ 新建</button>
-            <button class="queue-clear-button" type="button" id="clearQueueButton">清空</button>
-          </div>
-          <div class="queue-list" id="queueList"></div>
-        </section>
       </aside>
+
+      <section class="queue-panel" id="taskPanel" aria-label="作文任务中心">
+        <div class="task-panel-heading">
+          <div>
+            <p class="eyebrow">多任务</p>
+            <div class="task-panel-title-row">
+              <h2>作文任务</h2>
+              <span class="count-pill" id="queueCount">0</span>
+            </div>
+          </div>
+          <button class="icon-button task-panel-close" type="button" id="closeTaskPanelButton" title="收起任务列表" aria-label="收起任务列表">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+        </div>
+        <button class="primary-button task-new-button" type="button" id="newTaskButton">+ 新建作文</button>
+        <div class="task-filter-list" role="tablist" aria-label="任务筛选">
+          <button class="task-filter-button active" type="button" role="tab" aria-selected="true" data-task-filter="all">
+            全部 <span data-task-filter-count="all">0</span>
+          </button>
+          <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="pending">
+            待处理 <span data-task-filter-count="pending">0</span>
+          </button>
+          <button class="task-filter-button" type="button" role="tab" aria-selected="false" data-task-filter="done">
+            已完成 <span data-task-filter-count="done">0</span>
+          </button>
+        </div>
+        <div class="queue-list" id="queueList"></div>
+        <button class="queue-clear-button task-clear-button" type="button" id="clearQueueButton">清空全部任务</button>
+      </section>
+      <button class="task-panel-scrim" type="button" id="taskPanelScrim" aria-label="关闭任务列表" tabindex="-1"></button>
 
       <main class="main-area">
         <section class="topbar">
@@ -64,6 +87,13 @@
             <input class="student-title-input" id="currentStudentTitle" type="text" placeholder="姓名" aria-label="学生姓名" />
           </div>
           <div class="topbar-actions">
+            <button class="icon-button task-panel-toggle" type="button" id="toggleTaskPanelButton" title="显示或隐藏任务列表" aria-label="显示或隐藏任务列表" aria-controls="taskPanel" aria-expanded="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 5h16M4 12h16M4 19h16" />
+              </svg>
+              <strong>任务</strong>
+              <span id="taskToggleCount">0</span>
+            </button>
             <span class="model-pill" id="activeModelPill">OpenAI · GPT-4.1</span>
             <button class="primary-button" type="button" id="generateButton">批改</button>
             <span class="grading-status-chip" id="gradingStatus" hidden></span>

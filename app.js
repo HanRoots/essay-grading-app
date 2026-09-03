@@ -129,6 +129,7 @@ const state = {
   activeAnnotationIndex: "",
   currentImages: [],
   gradingJobs: new Map(),
+  taskFilter: "all",
   apiLoginPromise: null,
   ocrText: "",
   gradingHint: DEFAULT_GRADING_HINT,
@@ -229,6 +230,15 @@ function bindDesktopEvents() {
   $("#essayInput").addEventListener("input", handleEssayTextInput);
   $("#generateButton").addEventListener("click", startCurrentTaskGrading);
   $("#newTaskButton").addEventListener("click", createNewTextTask);
+  $("#toggleTaskPanelButton").addEventListener("click", toggleTaskPanel);
+  $("#closeTaskPanelButton").addEventListener("click", closeTaskPanel);
+  $("#taskPanelScrim").addEventListener("click", closeTaskPanel);
+  $$("[data-task-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.taskFilter = button.dataset.taskFilter || "all";
+      renderQueue();
+    });
+  });
   $("#clearButton").addEventListener("click", () => {
     $("#essayInput").value = "";
     state.currentImages = [];
@@ -342,7 +352,42 @@ async function createNewTextTask() {
     status: "draft"
   }, { immediate: true });
   setGradingStatus("已新建独立作文任务", "success");
+  closeTaskPanelForWorkspace();
   $("#essayInput")?.focus();
+}
+
+function toggleTaskPanel() {
+  const narrow = window.matchMedia("(max-width: 1120px)").matches;
+  if (narrow) {
+    document.body.classList.toggle("task-panel-open");
+  } else {
+    document.body.classList.toggle("task-panel-collapsed");
+  }
+  syncTaskPanelControls();
+}
+
+function closeTaskPanel() {
+  if (window.matchMedia("(max-width: 1120px)").matches) {
+    document.body.classList.remove("task-panel-open");
+  } else {
+    document.body.classList.add("task-panel-collapsed");
+  }
+  syncTaskPanelControls();
+}
+
+function closeTaskPanelForWorkspace() {
+  if (!window.matchMedia("(max-width: 1120px)").matches) return;
+  document.body.classList.remove("task-panel-open");
+  syncTaskPanelControls();
+}
+
+function syncTaskPanelControls() {
+  const narrow = window.matchMedia("(max-width: 1120px)").matches;
+  const expanded = narrow
+    ? document.body.classList.contains("task-panel-open")
+    : !document.body.classList.contains("task-panel-collapsed");
+  $("#toggleTaskPanelButton")?.setAttribute("aria-expanded", String(expanded));
+  $("#closeTaskPanelButton")?.setAttribute("title", narrow ? "关闭任务列表" : "收起任务列表");
 }
 
 async function startCurrentTaskGrading() {
@@ -1288,34 +1333,60 @@ function normalizeDeepSeekModelAlias(model) {
 
 function renderQueue() {
   $("#queueCount").textContent = queueItems.length;
+  if ($("#taskToggleCount")) $("#taskToggleCount").textContent = queueItems.length;
   $(".queue-panel")?.classList.toggle("empty", queueItems.length === 0);
-  $("#queueList").innerHTML = queueItems.map((item) => {
-    const status = getQueueTaskStatus(item);
+  const statuses = new Map(queueItems.map((item) => [item.id, getQueueTaskStatus(item)]));
+  const counts = {
+    all: queueItems.length,
+    pending: queueItems.filter((item) => statuses.get(item.id)?.tone !== "done").length,
+    done: queueItems.filter((item) => statuses.get(item.id)?.tone === "done").length
+  };
+  $$("[data-task-filter-count]").forEach((node) => {
+    node.textContent = counts[node.dataset.taskFilterCount] ?? 0;
+  });
+  $$("[data-task-filter]").forEach((button) => {
+    const active = button.dataset.taskFilter === state.taskFilter;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  const visibleItems = queueItems.filter((item) => {
+    const tone = statuses.get(item.id)?.tone;
+    if (state.taskFilter === "done") return tone === "done";
+    if (state.taskFilter === "pending") return tone !== "done";
+    return true;
+  });
+  $("#queueList").innerHTML = visibleItems.length ? visibleItems.map((item) => {
+    const status = statuses.get(item.id);
     const attachment = Number(item.images || 0) ? ` · ${Number(item.images)} 张附件` : "";
     return `
-      <button class="queue-item ${item.id === state.currentQueueId ? "active" : ""}" type="button" data-id="${item.id}">
-        <span class="queue-close" role="button" tabindex="0" data-close-id="${item.id}" aria-label="关闭任务 ${escapeHTML(item.student)}">×</span>
-        <strong>${escapeHTML(item.student || "未命名学生")}</strong>
-        <span>${escapeHTML(item.meta || "未设置任务")}${attachment}</span>
-        <em class="queue-task-status ${status.tone}">${status.label}</em>
-      </button>
+      <article class="queue-item ${item.id === state.currentQueueId ? "active" : ""}" data-id="${item.id}">
+        <button class="queue-item-main" type="button" data-task-open-id="${item.id}">
+          <strong>${escapeHTML(item.student || "未命名学生")}</strong>
+          <span>${escapeHTML(item.meta || "未设置任务")}${attachment}</span>
+          <em class="queue-task-status ${status.tone}">${status.label}</em>
+        </button>
+        <button class="queue-close" type="button" data-close-id="${item.id}" aria-label="删除任务 ${escapeHTML(item.student || "未命名学生")}" title="删除任务">×</button>
+      </article>
     `;
-  }).join("");
-  $$(".queue-item").forEach((button) => {
-    button.addEventListener("click", () => loadQueueItem(button.dataset.id));
+  }).join("") : `
+    <div class="task-filter-empty">
+      <strong>${queueItems.length ? "此分类暂无任务" : "还没有作文任务"}</strong>
+      <span>${queueItems.length ? "可以切换其他分类查看" : "点击上方按钮开始第一篇作文"}</span>
+    </div>
+  `;
+  $$("[data-task-open-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      loadQueueItem(button.dataset.taskOpenId);
+      closeTaskPanelForWorkspace();
+    });
   });
   $$("[data-close-id]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       closeQueueItem(button.dataset.closeId);
     });
-    button.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeQueueItem(button.dataset.closeId);
-    });
   });
+  syncTaskPanelControls();
 }
 
 function getQueueTaskStatus(item) {
