@@ -73,6 +73,20 @@ async function run() {
   const seed = await readData();
   assert.ok(Array.isArray(seed.promptLibrary));
   await updateData((data) => {
+    const oldPrompt = data.promptLibrary.find((item) => item.id === "g3a-u3");
+    Object.assign(oldPrompt, {
+      title: "我来编童话",
+      status: "本地已配置",
+      catalogVersion: 1,
+      requirements: ["旧版要求"]
+    });
+  });
+  const migrated = await readData();
+  const migratedPrompt = migrated.promptLibrary.find((item) => item.id === "g3a-u3");
+  assert.strictEqual(migratedPrompt.title, "续写故事");
+  assert.strictEqual(migratedPrompt.catalogVersion, 2);
+  assert.strictEqual(migratedPrompt.requirements.length, 24);
+  await updateData((data) => {
     data.modelConfig.apiKey = "must-not-persist";
     data.queueItems = [{
       id: "q-test",

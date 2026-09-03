@@ -178,7 +178,7 @@ function migrateData(data) {
     const existing = existingById.get(catalogItem.id);
     if (!existing) {
       changed = true;
-      return catalogItem;
+      return cloneData(catalogItem);
     }
 
     const catalogVersion = Number(catalogItem.catalogVersion || 1);
@@ -191,7 +191,7 @@ function migrateData(data) {
           ...existing,
           requirements: Array.isArray(existing.requirements) ? existing.requirements : catalogItem.requirements
         }
-      : catalogItem;
+      : cloneData(catalogItem);
 
     if (JSON.stringify(existing) !== JSON.stringify(merged)) {
       changed = true;
