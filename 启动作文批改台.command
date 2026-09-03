@@ -43,24 +43,15 @@ fi
 LOCAL_URL="http://127.0.0.1:${PORT}/index.html"
 if [ -n "$LAN_IP" ]; then
   LAN_WEB_URL="http://${LAN_IP}:${PORT}/index.html"
-  LAN_CAPTURE_URL="http://${LAN_IP}:${PORT}/capture.html"
 else
   LAN_WEB_URL=""
-  LAN_CAPTURE_URL=""
 fi
 
 if lsof -ti tcp:"$PORT" >/dev/null 2>&1; then
   echo "检测到作文批改台已经在 ${PORT} 端口运行。"
   echo ""
   echo "电脑端：$LOCAL_URL"
-  if [ -n "$LAN_CAPTURE_URL" ]; then
-    echo "手机拍照页：$LAN_CAPTURE_URL"
-  else
-    echo "未能自动识别局域网 IP，请确认电脑已连接 Wi-Fi。"
-  fi
-  echo ""
-  echo "手机和电脑需要连接同一个 Wi-Fi。"
-  echo "如果手机打不开，请检查 macOS 防火墙是否允许 Node.js 接收连接。"
+  [ -n "$LAN_WEB_URL" ] && echo "局域网电脑端：$LAN_WEB_URL"
   command -v open >/dev/null 2>&1 && open "$LOCAL_URL"
   echo ""
   read -r -p "按回车关闭此窗口。" || true
@@ -72,12 +63,10 @@ echo ""
 echo "电脑端：$LOCAL_URL"
 if [ -n "$LAN_WEB_URL" ]; then
   echo "局域网电脑端：$LAN_WEB_URL"
-  echo "手机拍照页：$LAN_CAPTURE_URL"
 else
   echo "未能自动识别局域网 IP，请确认电脑已连接 Wi-Fi。"
 fi
 echo ""
-echo "手机和电脑需要连接同一个 Wi-Fi。"
 echo "第一次启动时，如果系统询问是否允许 Node.js 接收网络连接，请选择“允许”。"
 echo ""
 echo "保持这个窗口打开，服务就会持续运行。"

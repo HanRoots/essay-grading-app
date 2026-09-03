@@ -5,7 +5,7 @@
 - **阿里云函数计算 FC Web 函数**：运行网页和 `/api/*`，无需购买或维护云服务器。
 - **GitHub Pages**：正式访问时托管静态网页，避免 FC 默认测试域名强制下载 HTML；网页通过 HTTPS 调用 FC API。
 - **私有 OSS Bucket**：保存任务状态、作文原图和预览图。
-- **浏览器直传 OSS**：上传图片时先向 FC 获取短期签名，再把每一页原图直接传入 OSS，避免图片经过函数计算造成超时或请求过大。
+- **浏览器直传 OSS**：仅在老师选择报告图片附件时使用短期签名直传；图片不参与识别、评分或点评定位。
 - **模型 API**：FC 在服务端调用 DeepSeek、Kimi 等模型；API Key 不发送给浏览器，也不写入 OSS 状态文件。
 
 本地版仍可继续使用。只有设置 `STORAGE_DRIVER=oss` 时，程序才进入云端模式。
@@ -91,9 +91,9 @@ CORS_ALLOWED_ORIGINS=https://你的GitHub用户名.github.io
 1. 创建 HTTP 触发器，允许匿名 HTTP 调用。应用 API 仍要求教师账号密码。
 2. 使用 HTTPS 的 FC 公网域名访问 `/api/health`，应看到 `"ok": true`。
 3. 将静态网页发布到 GitHub Pages，并在 `runtime-config.js` 中填写 FC API 地址。打开 Pages 地址后输入 `APP_USERNAME`、`APP_PASSWORD`。
-4. 在模型配置页测试文字模型和视觉模型。
-5. 用手机打开同一公网地址的 `/capture.html`，提交 2 页以上作文图片。
-6. 在电脑端确认任务出现、所有图片可载入、识别和批改可完成。
+4. 在模型配置页测试文字模型。
+5. 新建至少 3 个任务，分别粘贴作文并依次点击“批改”。
+6. 切换任务，确认正文、题目、提示词、进度和报告互不串联；按需测试报告图片附件。
 7. 回到 OSS，确认出现 `essay-grading/data/app-data.json` 和 `essay-grading/assets/`。
 
 正式给老师使用时，建议绑定已经备案的自定义域名并开启 HTTPS。FC 临时域名更适合部署验证。

@@ -2,13 +2,13 @@
 
 当前后端是一个 Node.js 服务，同时支持本地模式和阿里云无服务器模式：
 
-- 静态页面服务：`index.html`、`capture.html`、`styles.css`、`app.js`
+- 静态页面服务：`index.html`、`styles.css`、`runtime-config.js`、`app.js`
 - 本地 JSON 数据存储：`backend/data/app-data.json`
-- 云端 OSS 数据存储和浏览器短期签名直传
-- 题库与写作要求配置
-- 大模型 API 配置
-- 手机拍照提交队列
-- 报告生成 API
+- 云端 OSS 任务数据存储和可选报告图片附件
+- 教材题库、自定义题目与写作要求配置
+- 每个任务独立保存批改提示词、正文、状态和报告
+- 多任务提交，模型请求按服务商并发限制安全排队
+- 大模型结构化批改、升格与全文润色
 
 ## 启动
 
@@ -16,13 +16,9 @@
 npm run dev
 ```
 
-默认地址：
+默认地址：`http://127.0.0.1:8787`
 
-```text
-http://127.0.0.1:8787
-```
-
-阿里云函数计算部署请参阅根目录的 `ALIYUN_SERVERLESS_DEPLOY.md`。云端模式使用 `ali-oss`，本地模式不会加载这个依赖。
+阿里云函数计算部署请参阅根目录的 `ALIYUN_SERVERLESS_DEPLOY.md`。
 
 ## API
 
@@ -31,43 +27,29 @@ http://127.0.0.1:8787
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/bootstrap` | 前端启动所需数据 |
 | GET | `/api/prompts` | 获取作文题库 |
-| PUT | `/api/prompts/requirements` | 更新某篇作文的写作要求 |
+| PUT | `/api/prompts/requirements` | 更新作文写作要求 |
 | GET | `/api/model-config` | 获取模型配置和服务商 |
-| PUT | `/api/model-config` | 保存模型配置 |
-| POST | `/api/model-config/test` | 测试模型配置 |
-| GET | `/api/submissions` | 获取待处理作文队列 |
-| POST | `/api/submissions` | 手机端提交作文图片与任务信息 |
-| GET | `/api/submissions/:id` | 按需取得完整任务及临时原图地址 |
+| PUT | `/api/model-config` | 保存文字模型配置 |
+| POST | `/api/model-config/test` | 测试文字模型配置 |
+| GET | `/api/submissions` | 获取作文任务队列 |
+| POST | `/api/submissions` | 新建作文任务 |
+| GET | `/api/submissions/:id` | 获取完整任务和临时附件地址 |
 | PATCH | `/api/submissions/:id` | 自动保存任务和报告 |
-| DELETE | `/api/submissions/:id` | 删除任务及其 OSS 图片 |
-| POST | `/api/uploads/presign` | 生成 OSS 短期图片上传地址 |
-| POST | `/api/ocr` | 使用当前视觉模型读取作文图片文字 |
+| DELETE | `/api/submissions/:id` | 删除任务及其 OSS 附件 |
+| POST | `/api/uploads/presign` | 生成可选报告图片的 OSS 短期上传地址 |
 | POST | `/api/generate-report` | 生成作文批改报告 |
 
-## 拍照到报告链路
+## 文字批改链路
 
-1. 手机页选择学生、作文任务并拍照，前端为模型准备高质量图片和页面预览图。
-2. 本地模式把图片随任务保存；云端模式先获取短期签名，把每一页直接上传到私有 OSS，再把 Object Key 写入任务。
-3. Web 工作台先读取轻量队列，打开任务时再按需取得临时原图地址，老师可以在识别文本区调用 `/api/ocr`。
-4. 图片文字读取结果直接进入识别文本区，老师在同一区域校对和补充。
-5. `/api/generate-report` 根据作文题目、后台配置要求和确认后的识别文本完成批改。
-
-DeepSeek 当前可用于 OpenAI-compatible 文本接口连通性测试；图片文字读取需要选择支持视觉输入的模型，例如 Kimi 的 `moonshot-v1-128k-vision-preview`、OpenAI 的 `gpt-4.1`、`gpt-4o` 系列或自定义兼容视觉模型。
-
-## 作文题库
-
-题库源文件在 `backend/prompt-catalog.js`。当前已整理 3-6 年级上下册共 62 条单元习作，其中六年级下册为 6 条。
-
-每条题库包含：
-
-- `title`：作文题目。
-- `requirements`：核心写作要求，可在后台界面继续修改。
-- `abilityGoal`：能力目标，例如写人、写景、读后感、说明文、应用文。
-- `wordCountGuide`：年级建议字数范围。
-- `source`：整理来源与对应人教社教材链接。
+1. 老师新建任务，选择教材题目或填写自定义题目。
+2. 粘贴学生作文全文，并按需修改本任务的批改提示词。
+3. 正文和配置自动保存；老师可以切换任务继续录入其他作文。
+4. 多个任务可以依次点击“批改”，各自显示处理状态并独立接收报告。
+5. 报告保留要求检测、评分、编号点评、结构升格和按升格方向生成的全文润色。
+6. 原稿图片仅作为可选报告附件，不参与识别、评分或点评定位。
 
 ## 存储边界
 
-- 本地模式保留当前 JSON 文件和本地 API Key 配置，兼容老师电脑单机运行。
-- 云端模式把状态和图片保存到私有 OSS，并从函数环境变量读取模型 API Key。
-- 云端任务状态当前是单个 OSS JSON 文件，函数实例数和单实例并发需设为 `1`。多人高并发时应迁移到表格存储或数据库。
+- 本地模式保留当前 JSON 文件和本地 API Key 配置。
+- 云端模式把任务状态和可选图片附件保存到私有 OSS，并从函数环境变量读取模型 API Key。
+- 云端任务状态当前是单个 OSS JSON 文件，函数实例数和单实例并发需设为 `1`。多人高并发时应迁移到数据库。

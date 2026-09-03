@@ -128,6 +128,7 @@ const state = {
   annotationDragClickSuppressed: false,
   activeAnnotationIndex: "",
   currentImages: [],
+  gradingJobs: new Map(),
   apiLoginPromise: null,
   ocrText: "",
   gradingHint: DEFAULT_GRADING_HINT,
@@ -190,7 +191,6 @@ function redirectFilePageToLocalServer() {
 
 async function initDesktopPage() {
   await loadBackendBootstrap();
-  await loadNetworkInfo();
   renderQueue();
   renderLibraryTable();
   populateGradeSelect();
@@ -227,32 +227,8 @@ function bindDesktopEvents() {
   });
   $("#currentStudentTitle").addEventListener("input", handleStudentTitleInput);
   $("#essayInput").addEventListener("input", handleEssayTextInput);
-  $("#generateButton").addEventListener("click", async () => {
-    syncEssayTextToCurrentQueueItem();
-    if (!ensurePromptReadyForReport() || !ensureEssayReadyForReport()) return;
-    await flushQueueAutosaves();
-    setGradingStatus("正在批改...", "pending");
-    $("#generateButton").textContent = "批改中";
-    $("#generateButton").disabled = true;
-    try {
-      const report = await createReport();
-      state.currentReport = report;
-      renderReport(report);
-      syncCurrentQueueItem({
-        essay: getEssayForReport(),
-        ocrText: getEssayForReport(),
-        report
-      }, { immediate: true });
-      setGradingStatus("批改完成", "success");
-    } catch (error) {
-      const message = error.message || "批改失败";
-      setGradingStatus(message, "pending");
-      setOcrStatus(message, "pending");
-    } finally {
-      $("#generateButton").textContent = "批改";
-      $("#generateButton").disabled = false;
-    }
-  });
+  $("#generateButton").addEventListener("click", startCurrentTaskGrading);
+  $("#newTaskButton").addEventListener("click", createNewTextTask);
   $("#clearButton").addEventListener("click", () => {
     $("#essayInput").value = "";
     state.currentImages = [];
@@ -279,13 +255,6 @@ function bindDesktopEvents() {
   $("#reportPaper").addEventListener("mousedown", handlePolishFormatButton);
   $("#reportPaper").addEventListener("input", handleEditableReportInput);
   window.addEventListener("pagehide", persistCurrentQueueItemOnPageHide);
-  $("#openCaptureButton").addEventListener("click", async () => {
-    if (!state.networkInfo?.captureUrl) {
-      await loadNetworkInfo();
-    }
-    window.location.href = state.networkInfo?.captureUrl || "capture.html";
-  });
-  $("#copyCaptureUrlButton")?.addEventListener("click", copyCaptureUrl);
   $("#toggleRequirementEditor").addEventListener("click", () => {
     if (state.customPrompt.active) {
       setGradingStatus("自定义题目可直接在下方修改要求", "pending");
@@ -315,15 +284,16 @@ function bindDesktopEvents() {
   $("#gradingHintInput").addEventListener("input", () => {
     state.gradingHint = $("#gradingHintInput").value;
     window.localStorage.setItem(GRADING_HINT_STORAGE_KEY, state.gradingHint);
+    syncCurrentQueueItem({ gradingHint: state.gradingHint });
   });
   $("#resetGradingHintButton").addEventListener("click", () => {
     state.gradingHint = DEFAULT_GRADING_HINT;
     $("#gradingHintInput").value = DEFAULT_GRADING_HINT;
     window.localStorage.removeItem(GRADING_HINT_STORAGE_KEY);
+    syncCurrentQueueItem({ gradingHint: DEFAULT_GRADING_HINT });
     setGradingStatus("已恢复默认批改提示", "success");
   });
   $("#imageInput").addEventListener("change", handleImageUpload);
-  $("#runOcrButton").addEventListener("click", runOcrFromImages);
   $("#providerSelect").addEventListener("change", handleProviderChange);
   $("#modelSelect").addEventListener("change", () => {
     const previousModel = state.modelConfig.model;
@@ -334,23 +304,7 @@ function bindDesktopEvents() {
     renderModelOptions();
     updateActiveModelUI();
   });
-  $("#ocrProviderSelect").addEventListener("change", handleOcrProviderChange);
-  $("#ocrDedicatedModelSelect").addEventListener("change", () => {
-    state.modelConfig.ocrModel = $("#ocrDedicatedModelSelect").value;
-    updateOcrModelStatus();
-  });
-  $("#ocrModeSelect").addEventListener("change", () => {
-    state.modelConfig.ocrMode = $("#ocrModeSelect").value;
-    updateOcrModelStatus();
-  });
-  $("#ocrJudgeProviderSelect").addEventListener("change", handleOcrJudgeProviderChange);
-  $("#ocrJudgeModelSelect").addEventListener("change", () => {
-    state.modelConfig.ocrJudgeModel = $("#ocrJudgeModelSelect").value;
-    updateOcrModelStatus();
-  });
   $("#testModelButton").addEventListener("click", testModelConnection);
-  $("#testOcrModelButton").addEventListener("click", testOcrModelConnection);
-  $("#testOcrJudgeButton").addEventListener("click", testOcrJudgeConnection);
   $("#saveModelButton").addEventListener("click", saveModelConfig);
 
   $$(".nav-item[data-panel]").forEach((button) => {
@@ -359,6 +313,132 @@ function bindDesktopEvents() {
   $$(".tab-button").forEach((button) => {
     button.addEventListener("click", () => switchReportTab(button.dataset.reportTab));
   });
+}
+
+async function createNewTextTask() {
+  syncEssayTextToCurrentQueueItem();
+  await flushAutosavesBeforeGrading();
+  state.customPrompt = createDefaultCustomPrompt(false);
+  state.currentImages = [];
+  state.ocrText = "";
+  state.currentReport = null;
+  const item = createLocalQueueDraft({
+    student: "未命名学生",
+    essay: "",
+    ocrText: "",
+    imageData: [],
+    gradingHint: getSavedDefaultGradingHint(),
+    customPrompt: state.customPrompt,
+    report: null,
+    status: "draft"
+  });
+  applyQueueItemToWorkspace(item);
+  setCurrentStudentTitle("");
+  state.gradingHint = item.gradingHint;
+  $("#gradingHintInput").value = item.gradingHint;
+  syncCurrentQueueItem({
+    student: "未命名学生",
+    gradingHint: item.gradingHint,
+    status: "draft"
+  }, { immediate: true });
+  setGradingStatus("已新建独立作文任务", "success");
+  $("#essayInput")?.focus();
+}
+
+async function startCurrentTaskGrading() {
+  syncEssayTextToCurrentQueueItem();
+  if (!ensurePromptReadyForReport() || !ensureEssayReadyForReport()) return;
+  await flushAutosavesBeforeGrading();
+  const item = getCurrentQueueItem();
+  if (!item) {
+    setGradingStatus("任务保存失败，请稍后重试", "pending");
+    return;
+  }
+  const taskId = item.id;
+  if (state.gradingJobs.has(taskId)) {
+    setGradingStatus("这个任务正在批改，可以先处理其他作文", "pending");
+    return;
+  }
+
+  const request = buildTaskGradingRequest(item);
+  item.status = "grading";
+  item.gradingError = "";
+  state.gradingJobs.set(taskId, { startedAt: Date.now() });
+  scheduleQueueAutosave(taskId, { status: "grading", gradingError: "" }, true);
+  renderQueue();
+  updateGenerateButtonState();
+  setGradingStatus("正在批改；可以新建或切换到其他任务继续提交", "pending");
+
+  try {
+    const report = await createReportForTask(request);
+    const target = queueItems.find((entry) => entry.id === taskId);
+    const essayChangedDuringGrading = Boolean(target && String(target.essay || "").trim() !== request.essay.trim());
+    if (essayChangedDuringGrading) {
+      target.report = null;
+      target.status = "draft";
+      target.gradingError = "";
+      scheduleQueueAutosave(taskId, { report: null, status: "draft", gradingError: "" }, true);
+      if (state.currentQueueId === taskId) {
+        state.currentReport = null;
+        renderEmptyReport();
+        setGradingStatus("批改期间正文发生了修改，请按最新内容重新批改", "pending");
+      }
+      return;
+    }
+    if (target) {
+      report.sourceImages = normalizeClientImages(target.imageData || []);
+      target.report = report;
+      target.status = "done";
+      target.gradingError = "";
+      target.gradingHint = request.customInstructions;
+    }
+    if (state.currentQueueId === taskId) {
+      state.currentReport = report;
+      renderReport(report);
+      setGradingStatus("批改完成", "success");
+    }
+  } catch (error) {
+    const message = error.message || "批改失败";
+    const target = queueItems.find((entry) => entry.id === taskId);
+    if (target) {
+      target.status = "failed";
+      target.gradingError = message;
+      scheduleQueueAutosave(taskId, { status: "failed", gradingError: message }, true);
+    }
+    if (state.currentQueueId === taskId) setGradingStatus(message, "pending");
+  } finally {
+    state.gradingJobs.delete(taskId);
+    renderQueue();
+    updateGenerateButtonState();
+  }
+}
+
+async function flushAutosavesBeforeGrading() {
+  await flushQueueAutosaves();
+  const deadline = Date.now() + 15000;
+  while (state.autosaveInFlight && Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 60));
+  }
+  if (Object.keys(state.autosaveItems).length) await flushQueueAutosaves();
+}
+
+function buildTaskGradingRequest(item) {
+  const prompt = JSON.parse(JSON.stringify(getCurrentPrompt()));
+  return {
+    queueId: item.id,
+    student: getCurrentStudentName(item),
+    prompt,
+    essay: getEssayForReport(),
+    customInstructions: getGradingHintForReport()
+  };
+}
+
+function updateGenerateButtonState() {
+  const button = $("#generateButton");
+  if (!button) return;
+  const running = Boolean(state.currentQueueId && state.gradingJobs.has(state.currentQueueId));
+  button.disabled = running;
+  button.textContent = running ? "批改中" : "批改";
 }
 
 function printReportAsPdf() {
@@ -590,11 +670,13 @@ function mergeQueueFromServer(serverItems) {
   const localDrafts = queueItems.filter((item) => item.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX));
   const normalized = serverItems.map((item) => {
     if (item.id !== state.currentQueueId || !currentLocal) return item;
+    const serverFinished = item.status === "done" && item.report;
     return {
       ...item,
       essay: $("#essayInput")?.value || currentLocal.essay || item.essay || "",
       ocrText: state.ocrText || currentLocal.ocrText || item.ocrText || "",
-      report: state.currentReport || currentLocal.report || item.report || null,
+      gradingHint: $("#gradingHintInput")?.value || currentLocal.gradingHint || item.gradingHint || "",
+      report: serverFinished ? item.report : (state.currentReport || currentLocal.report || item.report || null),
       imageData: normalizeClientImages(item.imageData || []).length
         ? normalizeClientImages(item.imageData)
         : normalizeClientImages(currentLocal.imageData || state.currentImages || []),
@@ -618,11 +700,17 @@ function mergeQueueFromServer(serverItems) {
     loadQueueItem(incomingItem.id);
   } else if (!hadCurrent || !currentStillExists) {
     loadQueueItem(queueItems[0].id);
+  } else if (!state.gradingJobs.has(state.currentQueueId)) {
+    const refreshedCurrent = queueItems.find((item) => item.id === state.currentQueueId);
+    const reportChanged = refreshedCurrent?.report?.id && refreshedCurrent.report.id !== state.currentReport?.id;
+    const failureChanged = refreshedCurrent?.status === "failed" && refreshedCurrent.gradingError;
+    if (reportChanged || failureChanged) applyQueueItemToWorkspace(refreshedCurrent);
+    else renderQueue();
   } else {
     renderQueue();
   }
   if (newCount > 0) {
-    setOcrStatus(`收到 ${newCount} 个手机提交任务`, "success");
+    setGradingStatus(`已同步 ${newCount} 个新任务`, "success");
   }
 }
 
@@ -833,15 +921,8 @@ function initModelConfig() {
   normalizeModelConfigAliases();
   $("#providerSelect").innerHTML = llmProviders().map((provider) => `<option value="${provider.id}">${provider.name}</option>`).join("");
   $("#providerSelect").value = state.modelConfig.provider;
-  $("#ocrProviderSelect").innerHTML = ocrProviders().map((provider) => `<option value="${provider.id}">${provider.name}</option>`).join("");
-  $("#ocrProviderSelect").value = state.modelConfig.ocrProvider || "kimi";
-  $("#ocrJudgeProviderSelect").innerHTML = llmProviders().map((provider) => `<option value="${provider.id}">${provider.name}</option>`).join("");
-  $("#ocrJudgeProviderSelect").value = state.modelConfig.ocrJudgeProvider || "deepseek";
   renderModelOptions();
-  renderOcrModelOptions();
-  renderOcrJudgeOptions();
   updateActiveModelUI();
-  updateOcrModelStatus();
 }
 
 function handleProviderChange() {
@@ -976,35 +1057,16 @@ async function saveModelConfig() {
     return textModels.includes(raw) ? raw : fallback;
   };
   const inputBaseUrl = $("#baseUrlInput").value.trim();
-  const ocrProvider = ocrProviders().find((item) => item.id === $("#ocrProviderSelect").value) || modelProviders.find((item) => item.id === "kimi") || ocrProviders()[0];
-  const ocrVisionModels = visionModelsForProvider(ocrProvider);
-  const requestedOcrModel = $("#ocrDedicatedModelSelect").value;
-  const selectedOcrModel = ocrVisionModels.includes(requestedOcrModel)
-    ? requestedOcrModel
-    : preferredClientOcrModel(ocrProvider);
-  const ocrJudgeProvider = modelProviders.find((item) => item.id === $("#ocrJudgeProviderSelect").value) || modelProviders.find((item) => item.id === "deepseek") || provider;
-  const ocrJudgeTextModels = textModelsForProvider(ocrJudgeProvider);
-  const selectedOcrJudgeModel = ocrJudgeTextModels.includes($("#ocrJudgeModelSelect").value) ? $("#ocrJudgeModelSelect").value : preferredClientJudgeModel(ocrJudgeProvider);
   state.modelConfig = {
+    ...state.modelConfig,
     provider: selectedProviderId,
     model: selectedModel,
     apiMode: $("#apiModeSelect").value,
     baseUrl: providerChanged && !inputBaseUrl ? provider.baseUrl : (inputBaseUrl || provider.baseUrl),
     apiKey: $("#apiKeyInput").value.trim(),
     allowInsecureTls: $("#allowInsecureTlsInput").checked,
-    ocrMode: $("#ocrModeSelect").value,
-    ocrProvider: ocrProvider.id,
-    ocrModel: selectedOcrModel,
-    ocrBaseUrl: $("#ocrBaseUrlInput").value.trim() || ocrProvider.baseUrl,
-    ocrApiKey: $("#ocrApiKeyInput").value.trim(),
-    ocrAllowInsecureTls: $("#ocrAllowInsecureTlsInput").checked,
-    ocrJudgeProvider: ocrJudgeProvider.id,
-    ocrJudgeModel: selectedOcrJudgeModel,
-    ocrJudgeBaseUrl: $("#ocrJudgeBaseUrlInput").value.trim() || ocrJudgeProvider.baseUrl,
-    ocrJudgeApiKey: $("#ocrJudgeApiKeyInput").value.trim(),
-    ocrJudgeAllowInsecureTls: $("#ocrJudgeAllowInsecureTlsInput").checked,
     routes: {
-      ocr: selectedOcrModel,
+      ocr: state.modelConfig.routes?.ocr || state.modelConfig.ocrModel || "",
       grading: routeValue("#gradingModelRoute", selectedModel),
       polish: routeValue("#polishModelRoute", selectedModel)
     }
@@ -1027,11 +1089,8 @@ async function saveModelConfig() {
     }
   }
   renderModelOptions();
-  renderOcrModelOptions();
-  renderOcrJudgeOptions();
   $("#modelStatus").textContent = "已保存";
   $("#modelStatus").className = "status-chip success";
-  updateOcrModelStatus();
   updateActiveModelUI();
   if (state.currentReport) {
     $("#modelStatus").textContent = "已保存，请重新批改";
@@ -1146,10 +1205,14 @@ function getSelectedOcrJudgeProvider() {
 }
 
 function initGradingHint() {
-  const saved = window.localStorage.getItem(GRADING_HINT_STORAGE_KEY);
-  state.gradingHint = saved?.trim() ? saved : DEFAULT_GRADING_HINT;
+  state.gradingHint = getSavedDefaultGradingHint();
   const input = $("#gradingHintInput");
   if (input) input.value = state.gradingHint;
+}
+
+function getSavedDefaultGradingHint() {
+  const saved = window.localStorage.getItem(GRADING_HINT_STORAGE_KEY);
+  return saved?.trim() ? saved : DEFAULT_GRADING_HINT;
 }
 
 function getGradingHintForReport() {
@@ -1226,13 +1289,18 @@ function normalizeDeepSeekModelAlias(model) {
 function renderQueue() {
   $("#queueCount").textContent = queueItems.length;
   $(".queue-panel")?.classList.toggle("empty", queueItems.length === 0);
-  $("#queueList").innerHTML = queueItems.map((item) => `
-    <button class="queue-item ${item.id === state.currentQueueId ? "active" : ""}" type="button" data-id="${item.id}">
-      <span class="queue-close" role="button" tabindex="0" data-close-id="${item.id}" aria-label="关闭任务 ${escapeHTML(item.student)}">×</span>
-      <strong>${item.student}</strong>
-      <span>${item.meta} · ${item.images} 张图片</span>
-    </button>
-  `).join("");
+  $("#queueList").innerHTML = queueItems.map((item) => {
+    const status = getQueueTaskStatus(item);
+    const attachment = Number(item.images || 0) ? ` · ${Number(item.images)} 张附件` : "";
+    return `
+      <button class="queue-item ${item.id === state.currentQueueId ? "active" : ""}" type="button" data-id="${item.id}">
+        <span class="queue-close" role="button" tabindex="0" data-close-id="${item.id}" aria-label="关闭任务 ${escapeHTML(item.student)}">×</span>
+        <strong>${escapeHTML(item.student || "未命名学生")}</strong>
+        <span>${escapeHTML(item.meta || "未设置任务")}${attachment}</span>
+        <em class="queue-task-status ${status.tone}">${status.label}</em>
+      </button>
+    `;
+  }).join("");
   $$(".queue-item").forEach((button) => {
     button.addEventListener("click", () => loadQueueItem(button.dataset.id));
   });
@@ -1248,6 +1316,14 @@ function renderQueue() {
       closeQueueItem(button.dataset.closeId);
     });
   });
+}
+
+function getQueueTaskStatus(item) {
+  if (state.gradingJobs.has(item.id) || item.status === "grading") return { label: "批改中", tone: "running" };
+  if (item.status === "done" || item.report) return { label: "已完成", tone: "done" };
+  if (item.status === "failed") return { label: "批改失败", tone: "failed" };
+  if (String(item.essay || item.ocrText || "").replace(/\s/g, "").length >= 30) return { label: "待批改", tone: "ready" };
+  return { label: "编辑中", tone: "draft" };
 }
 
 async function closeQueueItem(id) {
@@ -1402,10 +1478,18 @@ function applyQueueItemToWorkspace(item) {
   $("#essayInput").value = essayText;
   state.currentImages = normalizeClientImages(item.imageData || []);
   state.ocrText = item.ocrText || essayText;
+  state.gradingHint = String(item.gradingHint || getSavedDefaultGradingHint());
+  $("#gradingHintInput").value = state.gradingHint;
   state.currentReport = item.report || null;
   renderImageWorkspace();
-  setOcrStatus(state.currentImages.length ? `${state.currentImages.length} 张原文图片已载入` : "", "success");
-  setGradingStatus("", "");
+  setOcrStatus(state.currentImages.length ? `${state.currentImages.length} 张报告图片附件已载入` : "", "success");
+  if (state.gradingJobs.has(item.id) || item.status === "grading") {
+    setGradingStatus("这个任务正在批改，可以切换到其他任务继续处理", "pending");
+  } else if (item.status === "failed" && item.gradingError) {
+    setGradingStatus(item.gradingError, "pending");
+  } else {
+    setGradingStatus("", "");
+  }
   renderPrompt();
   if (state.currentReport) {
     renderReport(state.currentReport);
@@ -1414,6 +1498,7 @@ function applyQueueItemToWorkspace(item) {
   }
   updateCharCount();
   renderQueue();
+  updateGenerateButtonState();
 }
 
 function populateGradeSelect() {
@@ -1660,8 +1745,7 @@ async function saveRequirementConfig() {
   renderPrompt();
   renderLibraryTable();
   if (state.currentReport) {
-    state.currentReport = await createReport();
-    renderReport(state.currentReport);
+    await startCurrentTaskGrading();
   }
 }
 
@@ -1672,7 +1756,19 @@ function updateCharCount() {
 
 function handleEssayTextInput() {
   updateCharCount();
+  const text = $("#essayInput")?.value || "";
+  const reportBecameStale = Boolean(state.currentReport && String(state.currentReport.essay || "") !== text.trim());
+  if (reportBecameStale) {
+    state.currentReport = null;
+    renderEmptyReport();
+  }
   syncEssayTextToCurrentQueueItem();
+  const item = getCurrentQueueItem();
+  if (item) {
+    const status = state.gradingJobs.has(item.id) ? "grading" : "draft";
+    syncCurrentQueueItem({ status, ...(reportBecameStale ? { report: null } : {}) });
+    renderQueue();
+  }
 }
 
 function syncEssayTextToCurrentQueueItem() {
@@ -1709,9 +1805,7 @@ function ensureEssayReadyForReport() {
   const essay = getEssayForReport();
   const compactLength = essay.replace(/\s/g, "").length;
   if (compactLength >= 30) return true;
-  const message = state.currentImages.length
-    ? "请先识别图片，并在识别文本区确认文字后再批改"
-    : "请先粘贴或输入作文文本后再批改";
+  const message = "请先粘贴或输入作文全文后再批改";
   setGradingStatus(message, "pending");
   setOcrStatus(message, "pending");
   switchPanel("workspace");
@@ -1748,19 +1842,17 @@ function generateReport() {
   };
 }
 
-async function createReport() {
+async function createReportForTask(request) {
   if (!state.backendAvailable) {
     throw new Error("报告评价必须由服务端大模型生成。请先启动后端服务并配置模型 API。");
   }
   try {
-    const prompt = getCurrentPrompt();
-    const essay = getEssayForReport();
-    const currentItem = queueItems.find((item) => item.id === state.currentQueueId) || queueItems[0];
+    const prompt = request.prompt;
     return await apiRequest("/api/generate-report", {
       method: "POST",
       body: {
-        queueId: state.currentQueueId || currentItem?.id || "",
-        student: getCurrentStudentName(currentItem),
+        queueId: request.queueId,
+        student: request.student,
         promptRef: {
           id: prompt.id,
           grade: prompt.grade,
@@ -1768,8 +1860,8 @@ async function createReport() {
           unit: prompt.unit
         },
         prompt,
-        essay,
-        customInstructions: getGradingHintForReport()
+        essay: request.essay,
+        customInstructions: request.customInstructions
       }
     });
   } catch (error) {
@@ -2065,8 +2157,7 @@ function buildPolishedEssay(prompt, essay, analysis) {
 function renderReport(report) {
   $("#reportEmpty").style.display = "none";
   state.currentReport = report;
-  decorateReportWithImageAnchors(report);
-  renderImageWorkspace();
+  decorateReportForTextReview(report);
   const overview = $("[data-report-view='overview']");
   const annotations = $("[data-report-view='annotations']");
   const upgrade = $("[data-report-view='upgrade']");
@@ -2146,33 +2237,59 @@ function renderAnnotations(report) {
   return `
     <div class="report-block">
       <h3>原文点评</h3>
-      <div class="annotation-workbench">
-        <svg class="annotation-link-layer" aria-hidden="true"></svg>
-        ${renderAnnotatedImages(report)}
-        <div class="annotation-list">
-          ${report.annotations.map((item, index) => `
-            <article class="annotation-card" data-annotation-index="${index}" id="annotation-card-${index + 1}">
-              <button
-                class="annotation-delete-button"
-                type="button"
-                data-delete-annotation-index="${index}"
-                aria-label="删除第 ${index + 1} 条点评"
-                title="删除这条点评"
-              >×</button>
-              <header>
-                <b><span class="annotation-card-number ${item.tone === "red" ? "red" : "blue"}">${index + 1}</span>${item.type}</b>
-                <span class="tag ${item.tone === "red" ? "red" : ""}">${item.type}</span>
-              </header>
-              ${item.anchor && Number.isInteger(item.anchor.pageIndex) ? `<p class="annotation-location">原图第 ${item.anchor.pageIndex + 1} 页 · 编号 ${index + 1}</p>` : ""}
-              <p><strong>原句：</strong>${escapeHTML(item.original || "原文中缺少对应表达")}</p>
-              <p>${escapeHTML(item.comment)}</p>
-              <div class="editable-note editable-report-text" data-report-edit="annotationSuggestion" data-report-edit-index="${index}">${escapeHTML(item.suggestion)}</div>
-            </article>
-          `).join("")}
-        </div>
+      <div class="annotation-list text-annotation-list">
+        ${report.annotations.map((item, index) => `
+          <article class="annotation-card" data-annotation-index="${index}" id="annotation-card-${index + 1}">
+            <button
+              class="annotation-delete-button"
+              type="button"
+              data-delete-annotation-index="${index}"
+              aria-label="删除第 ${index + 1} 条点评"
+              title="删除这条点评"
+            >×</button>
+            <header>
+              <b><span class="annotation-card-number ${item.tone === "red" ? "red" : "blue"}">${index + 1}</span>${escapeHTML(item.type)}</b>
+              <span class="tag ${item.tone === "red" ? "red" : ""}">${escapeHTML(item.type)}</span>
+            </header>
+            <p><strong>原句：</strong>${escapeHTML(item.original || "原文中缺少对应表达")}</p>
+            <p>${escapeHTML(item.comment)}</p>
+            <div class="editable-note editable-report-text" data-report-edit="annotationSuggestion" data-report-edit-index="${index}">${escapeHTML(item.suggestion)}</div>
+          </article>
+        `).join("")}
+      </div>
+    </div>
+    ${renderReportImageAttachments(report)}
+  `;
+}
+
+function renderReportImageAttachments(report) {
+  const images = normalizeClientImages(report.sourceImages || []);
+  if (!images.length) return "";
+  return `
+    <div class="report-block report-image-attachments">
+      <h3>原稿图片（附件）</h3>
+      <div class="report-image-list">
+        ${images.map((image, index) => `
+          <figure class="report-image-page">
+            <img src="${escapeAttr(image.dataUrl)}" alt="原稿附件第 ${index + 1} 页" />
+            <figcaption>第 ${index + 1} 页</figcaption>
+          </figure>
+        `).join("")}
       </div>
     </div>
   `;
+}
+
+function decorateReportForTextReview(report) {
+  report.sourceImages = report.sourceImages?.length ? normalizeClientImages(report.sourceImages) : getReportImages();
+  report.annotations = (report.annotations || [])
+    .map((item, index) => {
+      const range = findAnnotationTextRange(report, item, index);
+      const { anchor, ...textItem } = item;
+      return { ...textItem, orderOffset: range.offset, sourceIndex: index };
+    })
+    .sort((left, right) => (left.orderOffset - right.orderOffset) || (left.sourceIndex - right.sourceIndex))
+    .map(({ orderOffset, sourceIndex, ...item }) => item);
 }
 
 function renderAnnotatedImages(report) {
@@ -2662,13 +2779,11 @@ function deleteAnnotation(index) {
   if (!report?.annotations?.[index]) return;
   report.annotations.splice(index, 1);
   state.activeAnnotationIndex = "";
-  report.sourceImages = report.sourceImages?.length ? report.sourceImages : getReportImages();
   syncCurrentQueueItem({ report });
   const annotationsView = $("[data-report-view='annotations']");
   if (annotationsView) {
     annotationsView.innerHTML = renderAnnotations(report);
   }
-  renderImageWorkspace();
   applyEditMode();
   bindAnnotationLinks();
   switchReportTab("annotations");
@@ -3301,15 +3416,8 @@ function isFallbackPromptLibrary() {
 function switchReportTab(tab) {
   $$(".tab-button").forEach((button) => button.classList.toggle("active", button.dataset.reportTab === tab));
   $$("[data-report-view]").forEach((view) => view.classList.toggle("active", view.dataset.reportView === tab));
-  $("#workspacePanel")?.classList.toggle("annotation-sync-mode", tab === "annotations");
-  if (tab === "annotations") {
-    window.requestAnimationFrame(() => {
-      activateNearestVisibleAnnotation();
-      queueAnnotationConnectorUpdate();
-    });
-  } else {
-    clearAnnotationConnector();
-  }
+  $("#workspacePanel")?.classList.remove("annotation-sync-mode");
+  clearAnnotationConnector();
 }
 
 function toggleEditMode() {
@@ -3413,28 +3521,33 @@ function unwrapTeacherPolishSpans(root) {
 async function handleImageUpload(event) {
   const files = [...(event.target.files || [])].filter((file) => file.type.startsWith("image/"));
   if (!files.length) return;
-  setOcrStatus("正在处理图片", "pending");
+  setOcrStatus("正在处理报告图片附件", "pending");
   try {
     const existingImages = normalizeClientImages(state.currentImages);
     const availableSlots = Math.max(0, MAX_IMAGE_PAGES - existingImages.length);
     if (!availableSlots) {
-      setOcrStatus(`最多支持 ${MAX_IMAGE_PAGES} 张作文图片，请先清空后重新上传`, "pending");
+      setOcrStatus(`最多支持 ${MAX_IMAGE_PAGES} 张报告图片，请先清空后重新上传`, "pending");
       return;
     }
     const nextImages = await filesToImagePayload(files, availableSlots);
     state.currentImages = normalizeClientImages([...existingImages, ...nextImages]);
-    state.currentReport = null;
+    if (state.currentReport) state.currentReport.sourceImages = state.currentImages;
     syncCurrentQueueItem({
       images: state.currentImages.length,
       imageMeta: state.currentImages.map(toClientImageMeta),
       imageData: state.currentImages,
-      ocrStatus: "pending",
-      report: null
+      report: state.currentReport
     });
     renderImageWorkspace();
+    if (state.currentReport) {
+      const annotations = $("[data-report-view='annotations']");
+      renderReportSection(annotations, () => renderAnnotations(state.currentReport), "点评");
+      applyEditMode();
+      bindAnnotationLinks();
+    }
     renderQueue();
     const limitNote = files.length > nextImages.length ? `，已达到 ${MAX_IMAGE_PAGES} 张上限` : "";
-    setOcrStatus(`本次新增 ${nextImages.length} 张，共 ${state.currentImages.length} 张图片已就绪${limitNote}`, "success");
+    setOcrStatus(`已添加 ${nextImages.length} 张，共 ${state.currentImages.length} 张报告图片附件${limitNote}`, "success");
   } catch (error) {
     setOcrStatus(error.message || "图片处理失败", "pending");
   } finally {
@@ -3620,7 +3733,7 @@ function shouldCreateDraftForFields(fields = {}) {
 function createLocalQueueDraft(fields = {}) {
   const prompt = getCurrentPrompt();
   const images = normalizeClientImages(fields.imageData || state.currentImages || []);
-  const id = `${LOCAL_DRAFT_ID_PREFIX}${Date.now()}`;
+  const id = `${LOCAL_DRAFT_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const essay = String(fields.essay ?? fields.ocrText ?? $("#essayInput")?.value ?? "");
   const item = {
     id,
@@ -3637,9 +3750,11 @@ function createLocalQueueDraft(fields = {}) {
     images: images.length,
     imageMeta: images.map(toClientImageMeta),
     imageData: images,
+    gradingHint: String(fields.gradingHint || state.gradingHint || getSavedDefaultGradingHint()),
+    gradingError: String(fields.gradingError || ""),
     customPrompt: normalizeCustomPrompt(fields.customPrompt || state.customPrompt),
     report: fields.report || state.currentReport || null,
-    status: "draft",
+    status: fields.status || "draft",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -3786,6 +3901,8 @@ function buildSubmissionPayload(item) {
     ocrStatus: item.ocrStatus || "pending",
     images: imageData.length,
     imageData: serializeImagesForApi(imageData),
+    gradingHint: String(item.gradingHint || state.gradingHint || getSavedDefaultGradingHint()),
+    gradingError: String(item.gradingError || ""),
     customPrompt: normalizeCustomPrompt(item.customPrompt || state.customPrompt),
     report: item.report || null,
     status: item.status || "draft"

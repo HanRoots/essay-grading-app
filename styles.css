@@ -4029,3 +4029,141 @@ textarea::placeholder {
   display: flex;
   justify-content: flex-end;
 }
+
+.queue-new-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.queue-new-button:hover,
+.queue-new-button:focus-visible {
+  border-color: #2f67ea;
+  background: #dbeafe;
+  outline: none;
+}
+
+.queue-item {
+  min-height: 76px;
+}
+
+.queue-task-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.queue-task-status.ready {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.queue-task-status.running {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.queue-task-status.done {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.queue-task-status.failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.text-annotation-list {
+  display: grid;
+  gap: 14px;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.report-image-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.report-image-page {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.report-image-page img {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+}
+
+.report-image-page figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .report-image-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .report-image-attachments {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .report-image-list {
+    display: block;
+  }
+
+  .report-image-page {
+    display: grid;
+    place-items: center;
+    min-height: 240mm;
+    padding: 0;
+    border: 0;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .report-image-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .report-image-page img {
+    width: 100%;
+    max-height: 230mm;
+    object-fit: contain;
+  }
+
+  .report-image-page figcaption {
+    display: none;
+  }
+}

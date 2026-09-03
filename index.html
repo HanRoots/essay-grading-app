@@ -45,19 +45,13 @@
             </svg>
             模型配置
           </button>
-          <a class="nav-item link-item" href="capture.html">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M7 7h10l1.5 2H21v10H3V9h2.5L7 7Z" />
-              <circle cx="12" cy="14" r="3.2" />
-            </svg>
-            手机拍照页
-          </a>
         </nav>
 
         <section class="queue-panel" aria-label="待处理队列">
           <div class="section-title-row">
             <h2>待处理</h2>
-            <span class="count-pill" id="queueCount">3</span>
+            <span class="count-pill" id="queueCount">0</span>
+            <button class="queue-new-button" type="button" id="newTaskButton">+ 新建</button>
             <button class="queue-clear-button" type="button" id="clearQueueButton">清空</button>
           </div>
           <div class="queue-list" id="queueList"></div>
@@ -71,17 +65,6 @@
           </div>
           <div class="topbar-actions">
             <span class="model-pill" id="activeModelPill">OpenAI · GPT-4.1</span>
-            <span class="capture-share-chip" id="captureShareChip" hidden>
-              <span>手机访问</span>
-              <code id="captureShareUrl"></code>
-              <button type="button" id="copyCaptureUrlButton">复制</button>
-            </span>
-            <button class="icon-button" type="button" id="openCaptureButton" title="打开手机拍照页" aria-label="打开手机拍照页">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
-                <path d="M10 18h4" />
-              </svg>
-            </button>
             <button class="primary-button" type="button" id="generateButton">批改</button>
             <span class="grading-status-chip" id="gradingStatus" hidden></span>
           </div>
@@ -171,40 +154,24 @@
                 <div class="module-heading">
                   <div>
                     <p class="eyebrow">作文原文</p>
-                    <h3>识别文本区</h3>
+                    <h3>作文正文</h3>
                   </div>
                   <span class="metric-chip"><span id="charCount">0</span> 字</span>
                 </div>
-                <textarea id="essayInput" spellcheck="false" placeholder="如果学生作文字迹过于潦草导致识别率较低，可以先使用大模型（如 DeepSeek）进行识别，然后将识别出的文本复制过来再点击批改，同时注意不要删除原始图片。"></textarea>
+                <textarea id="essayInput" spellcheck="false" placeholder="请粘贴或输入学生作文全文。正文会自动保存到当前任务，切换到其他任务后仍可继续编辑。"></textarea>
                 <div class="ocr-review">
-                  <div class="thumb-grid ocr-thumb-grid" id="ocrThumbGrid" aria-label="已上传原文图片"></div>
+                  <div class="thumb-grid ocr-thumb-grid" id="ocrThumbGrid" aria-label="报告图片附件"></div>
                   <div class="input-actions">
                     <label class="file-trigger">
                       <input id="imageInput" type="file" accept="image/*" multiple />
-                      上传原文图片
+                      添加报告图片（可选）
                     </label>
-                    <button class="secondary-button" type="button" id="runOcrButton">识别图片</button>
                     <button class="ghost-button" type="button" id="clearButton">清空</button>
                   </div>
                   <div class="capture-result compact" id="ocrStatus"></div>
                 </div>
               </div>
 
-              <div class="module-block image-workspace-module">
-                <div class="module-heading">
-                  <div>
-                    <p class="eyebrow">原文图片</p>
-                    <h3>批注定位</h3>
-                  </div>
-                  <span class="legend"><i class="dot red"></i>佳句 <i class="dot blue"></i>润色</span>
-                </div>
-                <div class="image-stage" id="imageStage">
-                  <div class="image-empty-state">
-                    <strong>暂无原文图片</strong>
-                    <p>上传或拍照后，这里会显示可联动的批注定位。</p>
-                  </div>
-                </div>
-              </div>
             </section>
 
             <section class="report-column">
@@ -240,7 +207,7 @@
                     <div></div>
                   </div>
                   <h3>无任务</h3>
-                  <p>请从手机拍照页添加任务，或在识别文本区输入作文后批改。</p>
+                  <p>点击“新建”，粘贴作文全文后即可批改；多个任务可以依次提交并独立处理。</p>
                 </div>
 
                 <section class="report-section active" data-report-view="overview"></section>
@@ -334,75 +301,12 @@
                   </label>
                 </div>
               </details>
-              <div class="ocr-config-box">
-                <div class="editor-title-row">
-                  <span class="field-label">图片文字读取</span>
-                  <span class="status-chip pending" id="ocrModelStatus">需视觉模型</span>
-                </div>
-                <div class="form-grid model-form-grid">
-                  <label>
-                    读取模式
-                    <select id="ocrModeSelect">
-                      <option value="enhanced">视觉识别 + 模型校对</option>
-                      <option value="fast">仅图片识别</option>
-                    </select>
-                  </label>
-                  <label>
-                    视觉服务商
-                    <select id="ocrProviderSelect"></select>
-                  </label>
-                  <label>
-                    视觉模型
-                    <select id="ocrDedicatedModelSelect"></select>
-                  </label>
-                </div>
-                <div class="form-grid model-form-grid wide">
-                  <label>
-                    视觉 Base URL
-                    <input class="config-input" id="ocrBaseUrlInput" type="url" />
-                  </label>
-                  <label>
-                    视觉 API Key
-                    <input class="config-input" id="ocrApiKeyInput" type="password" placeholder="Kimi API Key" />
-                  </label>
-                </div>
-                <label class="checkbox-row tls-row">
-                  <input id="ocrAllowInsecureTlsInput" type="checkbox" />
-                  <span>本地开发：视觉读取忽略 TLS 证书校验</span>
-                </label>
-                <div class="form-grid model-form-grid">
-                  <label>
-                    校对服务商
-                    <select id="ocrJudgeProviderSelect"></select>
-                  </label>
-                  <label>
-                    校对模型
-                    <select id="ocrJudgeModelSelect"></select>
-                  </label>
-                </div>
-                <div class="form-grid model-form-grid wide">
-                  <label>
-                    校对 Base URL
-                    <input class="config-input" id="ocrJudgeBaseUrlInput" type="url" />
-                  </label>
-                  <label>
-                    校对 API Key
-                    <input class="config-input" id="ocrJudgeApiKeyInput" type="password" placeholder="留空时可复用主 DeepSeek Key" />
-                  </label>
-                </div>
-                <label class="checkbox-row tls-row">
-                  <input id="ocrJudgeAllowInsecureTlsInput" type="checkbox" />
-                  <span>本地开发：校对模型忽略 TLS 证书校验</span>
-                </label>
-              </div>
               <label class="checkbox-row tls-row">
                 <input id="allowInsecureTlsInput" type="checkbox" />
                 <span>本地开发：忽略 TLS 证书校验</span>
               </label>
               <div class="input-actions">
                 <button class="secondary-button" type="button" id="testModelButton">测试连接</button>
-                <button class="secondary-button" type="button" id="testOcrModelButton">测试视觉连接</button>
-                <button class="secondary-button" type="button" id="testOcrJudgeButton">测试校对连接</button>
                 <button class="primary-button" type="button" id="saveModelButton">保存模型配置</button>
               </div>
             </div>

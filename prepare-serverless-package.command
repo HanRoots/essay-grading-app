@@ -16,7 +16,6 @@ rm -rf "$BUILD_DIR" "$ZIP_FILE"
 mkdir -p "$BUILD_DIR/backend"
 
 cp "$ROOT_DIR/index.html" "$BUILD_DIR/"
-cp "$ROOT_DIR/capture.html" "$BUILD_DIR/"
 cp "$ROOT_DIR/styles.css" "$BUILD_DIR/"
 cp "$ROOT_DIR/runtime-config.js" "$BUILD_DIR/"
 cp "$ROOT_DIR/app.js" "$BUILD_DIR/"

@@ -30,7 +30,7 @@ const STARTUP_READY = RESET_WORKSPACE_ON_START
       return result;
     })
   : Promise.resolve(null);
-const PUBLIC_FILES = new Set(["/", "/index.html", "/capture.html", "/styles.css", "/runtime-config.js", "/app.js"]);
+const PUBLIC_FILES = new Set(["/", "/index.html", "/styles.css", "/runtime-config.js", "/app.js"]);
 const MAX_IMAGE_PAGES = 12;
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024;
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
@@ -73,7 +73,7 @@ server.listen(PORT, "0.0.0.0", () => {
     console.log(`Workspace session reset at ${startupReset.resetAt}`);
   }
   if (urls.lan.length) {
-    console.log(`Phone capture page: ${urls.lan[0]}/capture.html`);
+    console.log(`LAN workspace: ${urls.lan[0]}/index.html`);
   }
 });
 
@@ -286,6 +286,8 @@ async function handleApi(req, res, url) {
         images: imageData.length || Number(body.images || 0),
         imageMeta: imageData.map(toImageMeta),
         imageData,
+        gradingHint: String(body.gradingHint || ""),
+        gradingError: String(body.gradingError || ""),
         customPrompt: body.customPrompt || null,
         report: stripReportImageCopies(body.report),
         status: body.status || "pending",
@@ -473,7 +475,7 @@ async function handleApi(req, res, url) {
     if (!String(body.essay || "").replace(/\s/g, "") || String(body.essay || "").replace(/\s/g, "").length < 30) {
       sendJson(res, 400, {
         error: "essay_required",
-        message: "请先完成图片文字读取并确认识别文本后再批改"
+        message: "请先粘贴或输入作文全文后再批改"
       });
       return;
     }
@@ -485,6 +487,17 @@ async function handleApi(req, res, url) {
     }
     const provider = data.modelProviders.find((item) => item.id === data.modelConfig.provider) || data.modelProviders[0];
     const gradingModel = data.modelConfig.routes?.grading || data.modelConfig.model || provider.models[0];
+    if (body.queueId) {
+      await updateData((nextData) => {
+        const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
+        if (queueItem) {
+          queueItem.status = "grading";
+          queueItem.gradingError = "";
+          queueItem.updatedAt = new Date().toISOString();
+        }
+        return queueItem;
+      });
+    }
     try {
       const modelResult = await gradeEssayReport({
         provider: provider.id,
@@ -522,8 +535,17 @@ async function handleApi(req, res, url) {
         if (body.queueId) {
           const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
           if (queueItem) {
-            queueItem.essay = body.essay;
-            queueItem.report = report;
+            const essayUnchanged = String(queueItem.essay || "").trim() === String(body.essay || "").trim();
+            if (essayUnchanged) {
+              queueItem.report = report;
+              queueItem.gradingHint = String(body.customInstructions || queueItem.gradingHint || "");
+              queueItem.status = "done";
+              queueItem.gradingError = "";
+            } else {
+              queueItem.report = null;
+              queueItem.status = "draft";
+              queueItem.gradingError = "";
+            }
             queueItem.updatedAt = new Date().toISOString();
           }
         }
@@ -531,6 +553,17 @@ async function handleApi(req, res, url) {
       });
       sendJson(res, 200, report);
     } catch (error) {
+      if (body.queueId) {
+        await updateData((nextData) => {
+          const queueItem = nextData.queueItems.find((item) => item.id === body.queueId);
+          if (queueItem) {
+            queueItem.status = "failed";
+            queueItem.gradingError = String(error.message || "批改失败");
+            queueItem.updatedAt = new Date().toISOString();
+          }
+          return queueItem;
+        });
+      }
       sendJson(res, 502, {
         error: "model_grading_failed",
         message: error.message
@@ -816,6 +849,8 @@ function applySubmissionPatch(item, body) {
     "essay",
     "ocrText",
     "ocrStatus",
+    "gradingHint",
+    "gradingError",
     "status"
   ];
   textFields.forEach((field) => {
@@ -866,6 +901,8 @@ function toQueueSummary(item) {
     imageMeta,
     imageData: [],
     hasImageData: normalizeImageData(item.imageData).length > 0,
+    gradingHint: String(item.gradingHint || ""),
+    gradingError: String(item.gradingError || ""),
     customPrompt: item.customPrompt || null,
     report: stripReportImageCopies(item.report),
     status: item.status || "pending",
