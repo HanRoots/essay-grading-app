@@ -11,6 +11,11 @@ const {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const now = Date.parse("2026-09-03T12:00:00.000Z");
 const data = {
+  teacherProfiles: [
+    { id: "teacher-1", name: "momo" },
+    { id: "teacher-2", name: "教师 2" },
+    { id: "teacher-3", name: "教师 3" }
+  ],
   queueItems: [
     {
       id: "old-task",
@@ -33,7 +38,12 @@ const data = {
 
 assert.strictEqual(TASK_RETENTION_DAYS, 15);
 assert.strictEqual(ensureWorkspacePolicyData(data), true);
-assert.strictEqual(data.teacherProfiles.length, 3);
+assert.strictEqual(data.teacherProfiles.length, 5);
+assert.strictEqual(data.teacherProfiles[0].name, "momo");
+assert.deepStrictEqual(
+  data.teacherProfiles.slice(3).map((profile) => profile.name),
+  ["教师 4", "教师 5"]
+);
 assert.strictEqual(data.queueItems[0].teacherId, "teacher-1");
 assert.strictEqual(resolveTeacherId("unknown", data.teacherProfiles), "teacher-1");
 assert.strictEqual(itemBelongsToTeacher(data.queueItems[1], "teacher-2", data.teacherProfiles), true);

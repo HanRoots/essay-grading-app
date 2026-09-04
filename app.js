@@ -13,7 +13,9 @@ const TEACHER_PROFILE_STORAGE_KEY = "essayActiveTeacherId";
 const DEFAULT_TEACHER_PROFILES = [
   { id: "teacher-1", name: "教师 1" },
   { id: "teacher-2", name: "教师 2" },
-  { id: "teacher-3", name: "教师 3" }
+  { id: "teacher-3", name: "教师 3" },
+  { id: "teacher-4", name: "教师 4" },
+  { id: "teacher-5", name: "教师 5" }
 ];
 const DEFAULT_TASK_RETENTION_DAYS = 15;
 const APP_DEPLOYMENT_CONFIG = window.ESSAY_APP_CONFIG || {};

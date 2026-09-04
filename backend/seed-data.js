@@ -229,7 +229,9 @@ const modelConfig = {
 const teacherProfiles = [
   { id: "teacher-1", name: "教师 1" },
   { id: "teacher-2", name: "教师 2" },
-  { id: "teacher-3", name: "教师 3" }
+  { id: "teacher-3", name: "教师 3" },
+  { id: "teacher-4", name: "教师 4" },
+  { id: "teacher-5", name: "教师 5" }
 ];
 
 function createSeedData() {
