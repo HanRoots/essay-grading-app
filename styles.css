@@ -3358,7 +3358,7 @@ textarea::placeholder {
 
 @page {
   size: A4;
-  margin: 0;
+  margin: 14mm 0 16mm;
 }
 
 .print-frame {
@@ -3447,7 +3447,7 @@ textarea::placeholder {
   .report-section {
     display: block !important;
     margin: 0;
-    padding: 12mm 0 14mm;
+    padding: 0;
     break-after: auto;
     page-break-after: auto;
   }
@@ -3466,7 +3466,7 @@ textarea::placeholder {
   }
 
   .report-section[data-report-view="annotations"] {
-    padding-bottom: 8mm;
+    padding-bottom: 0;
   }
 
   .report-head {
@@ -3479,19 +3479,8 @@ textarea::placeholder {
     border-bottom: 2px solid var(--print-blue);
   }
 
-  .report-head::before {
-    content: "AI 作文批改";
-    position: absolute;
-    top: -1mm;
-    left: 0;
-    color: var(--print-blue);
-    font-size: 8pt;
-    font-weight: 800;
-    letter-spacing: 0;
-  }
-
   .report-head h2 {
-    margin: 5mm 0 0;
+    margin: 0;
     color: var(--print-ink);
     font-size: 24pt;
     font-weight: 900;
@@ -3601,6 +3590,11 @@ textarea::placeholder {
     line-height: 1.25;
     break-after: avoid;
     page-break-after: avoid;
+  }
+
+  .report-section[data-report-view="polished"] .report-block h3 {
+    break-after: auto;
+    page-break-after: auto;
   }
 
   .report-block h3::before {
