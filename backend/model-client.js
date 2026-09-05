@@ -60,8 +60,9 @@ const ESSAY_SCORING_RUBRIC = [
   "3. 如果只有一个片段、没有完整开头/中间/结尾，总分通常不超过 75 分。",
   "4. 如果内容较完整但错别字或标点很多，不要让行文规范超过 3 档。",
   "5. 三四年级侧重写清楚和语句通顺；五六年级要更重视详略、结构、真实感受和具体描写。",
-  "6. scores.items 的 value 必须是 1-5 的整数；note 必须写明评分依据，并尽量说明折算分，例如“约 28/35”。",
-  "7. total 必须与四项档次一致，不能四项都偏低但总分很高，也不能四项都较好但总分过低。"
+  "6. 七年级处于初中写作起始阶段，应重点评价真实观察、中心与材料关系、思路清晰和具体表达，不强求立意宏大或技巧复杂。",
+  "7. scores.items 的 value 必须是 1-5 的整数；note 必须写明评分依据，并尽量说明折算分，例如“约 28/35”。",
+  "8. total 必须与四项档次一致，不能四项都偏低但总分很高，也不能四项都较好但总分过低。"
 ].join("\n");
 const SCORE_DIMENSIONS = [
   { name: "内容", max: 35 },
@@ -1395,7 +1396,7 @@ async function repairModelJsonResponse(config, brokenContent, parseMessage) {
 
 function buildEssayGradingSystemPrompt(options = {}) {
   const lines = [
-    "你是一名有小学语文作文批改经验的老师，正在为 3-6 年级学生生成作文批改报告。",
+    "你是一名有语文作文批改经验的老师，正在为三至七年级学生生成作文批改报告。",
     "你的评价必须完全基于用户提供的作文原文和习作要求，不能套用模板，不能引用原文中不存在的情节、人物、动作或物品。",
     "每条评价都要有客观依据：能指出原文证据、问题位置、修改理由和具体改法。",
     "点评数量和升格指导数量不按固定模板数量，按文章实际需要生成；优先保证完整 JSON，避免为了凑数或过度展开导致输出被截断。",
@@ -1502,7 +1503,7 @@ function buildEssayGradingUserPrompt(config, options = {}) {
 
 function buildRequirementRecoverySystemPrompt() {
   return [
-    "你是一名小学语文作文审题与习作要求评价老师。",
+    "你是一名语文作文审题与习作要求评价老师。",
     "你只补生成 requirements 数组，不重新评分，不重新写原文点评，不生成升格指导和润色全文。",
     "requirements 必须逐条对应本次习作要求，评价要完全基于作文原文。",
     "每条评价都要说明学生是否达成该要求，并引用原文内容作为依据。",
@@ -1564,7 +1565,7 @@ function buildRequirementRecoveryUserPrompt(config, report, reason) {
 
 function buildScoreRecoverySystemPrompt() {
   return [
-    "你是一名小学语文作文评分老师。",
+    "你是一名语文作文评分老师。",
     "你只补生成 scores 对象，不重新写总评，不重新写原文点评，不生成升格指导和润色全文。",
     "评分必须完全基于作文原文、习作要求和评分标准，不能因为书写、拍照或识别难度给分。",
     "scores.items 必须且只能包含四项：内容、表达、结构、行文规范。",
@@ -1634,7 +1635,7 @@ function buildScoreRecoveryUserPrompt(config, report, reason) {
 
 function buildStructureGuideRecoverySystemPrompt() {
   return [
-    "你是一名小学语文作文结构升格诊断老师。",
+    "你是一名语文作文结构升格诊断老师。",
     "你只补生成 guide 数组，不重新评分，不重新写原文点评，不生成全文润色。",
     "guide 必须只关注文章结构：开头、中间、结尾、段落顺序、详略安排、字数比例、过渡和重点情节展开。",
     "不要在 guide 中写错别字、标点、词句润色、修辞赏析或单句表达建议。",
@@ -1696,7 +1697,7 @@ function buildStructureGuideRecoveryUserPrompt(config, report, reason) {
 
 function buildGuidePolishSystemPrompt() {
   return [
-    "你是一名小学语文作文升格润色老师。",
+    "你是一名语文作文升格润色老师。",
     "你现在只负责根据已经生成的“结构升格建议”改写全文，不能重新评分，不能重新写点评。",
     "润色全文必须优先落实结构升格建议：开头怎么调整、中间哪里详写或略写、哪里补过渡、结尾怎么收束，都要体现在 polished 全文里。",
     "如果升格建议指出“详略不当”“重点不突出”“关键过程太少”，polished 必须实际调整篇幅比例：围绕原文已有的关键事件补充孩子能写出的动作、心理、困难、尝试或结果，不能只改几个词。",

@@ -29,7 +29,7 @@ const PREVIEW_IMAGE_MAX_EDGE = 1200;
 const PREVIEW_IMAGE_JPEG_QUALITY = 0.78;
 const MODEL_SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 const DEFAULT_GRADING_HINT = [
-  "请以小学语文老师的口吻批改作文，评价必须基于学生原文。",
+  "请以语文老师的口吻批改作文，评价必须基于学生原文。",
   "点评要具体、客观，指出原句位置、问题原因和可执行修改建议。",
   "不要套模板，不要拔高孩子思想；润色要保留孩子原有想法和语言水平。"
 ].join("\n");
@@ -1724,7 +1724,7 @@ function applyQueueItemToWorkspace(item) {
 }
 
 function populateGradeSelect() {
-  const gradeOrder = new Map(["三年级", "四年级", "五年级", "六年级"].map((grade, index) => [grade, index]));
+  const gradeOrder = new Map(["三年级", "四年级", "五年级", "六年级", "七年级"].map((grade, index) => [grade, index]));
   const grades = unique(promptLibrary.map((item) => item.grade)).sort((left, right) => (
     (gradeOrder.get(left) ?? 99) - (gradeOrder.get(right) ?? 99)
   ));
@@ -4338,7 +4338,7 @@ function renderLibraryTable() {
 }
 
 function sortedPromptLibrary() {
-  const gradeOrder = new Map(["三年级", "四年级", "五年级", "六年级"].map((grade, index) => [grade, index]));
+  const gradeOrder = new Map(["三年级", "四年级", "五年级", "六年级", "七年级"].map((grade, index) => [grade, index]));
   const bookOrder = new Map(["上册", "下册"].map((book, index) => [book, index]));
   return [...promptLibrary].sort((left, right) => (
     (gradeOrder.get(left.grade) ?? 99) - (gradeOrder.get(right.grade) ?? 99) ||
@@ -4359,7 +4359,7 @@ function countPromptsByGradeBook(prompts) {
 
 function sortedPromptLibraryKeys() {
   const keys = [];
-  ["三年级", "四年级", "五年级", "六年级"].forEach((grade) => {
+  ["三年级", "四年级", "五年级", "六年级", "七年级"].forEach((grade) => {
     ["上册", "下册"].forEach((book) => keys.push(`${grade}${book}`));
   });
   return keys;
