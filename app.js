@@ -29,6 +29,16 @@ const PREVIEW_IMAGE_MAX_EDGE = 1200;
 const PREVIEW_IMAGE_JPEG_QUALITY = 0.78;
 const MODEL_SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 const DEFAULT_GRADING_HINT = [
+  "请以小学语文老师的口吻批改作文，评价必须基于学生原文。",
+  "点评要具体、客观，指出原句位置、问题原因和可执行修改建议。",
+  "不要套模板，不要拔高孩子思想；润色要保留孩子原有想法和语言水平。"
+].join("\n");
+const GRADE_SEVEN_GRADING_HINT = [
+  "请以老师的口吻批改作文，评价必须基于学生原文。",
+  "点评要具体、客观，指出原句位置、问题原因和可执行修改建议。",
+  "不要套模板，不要拔高孩子思想；润色要保留孩子原有想法和语言水平。"
+].join("\n");
+const PREVIOUS_SHARED_GRADING_HINT = [
   "请以语文老师的口吻批改作文，评价必须基于学生原文。",
   "点评要具体、客观，指出原句位置、问题原因和可执行修改建议。",
   "不要套模板，不要拔高孩子思想；润色要保留孩子原有想法和语言水平。"
@@ -231,6 +241,7 @@ function bindDesktopEvents() {
     populateBookSelect();
     populateUnitSelect();
     renderPrompt();
+    syncSystemGradingHintForSelectedGrade();
     syncPromptSelectionToCurrentQueueItem();
   });
   $("#bookSelect").addEventListener("change", () => {
@@ -315,10 +326,11 @@ function bindDesktopEvents() {
     syncCurrentQueueItem({ gradingHint: state.gradingHint });
   });
   $("#resetGradingHintButton").addEventListener("click", () => {
-    state.gradingHint = DEFAULT_GRADING_HINT;
-    $("#gradingHintInput").value = DEFAULT_GRADING_HINT;
+    const defaultHint = getDefaultGradingHintForGrade();
+    state.gradingHint = defaultHint;
+    $("#gradingHintInput").value = defaultHint;
     window.localStorage.removeItem(GRADING_HINT_STORAGE_KEY);
-    syncCurrentQueueItem({ gradingHint: DEFAULT_GRADING_HINT });
+    syncCurrentQueueItem({ gradingHint: defaultHint });
     setGradingStatus("已恢复默认批改提示", "success");
   });
   $("#imageInput").addEventListener("change", handleImageUpload);
@@ -1322,13 +1334,36 @@ function initGradingHint() {
   if (input) input.value = state.gradingHint;
 }
 
-function getSavedDefaultGradingHint() {
+function getDefaultGradingHintForGrade(grade = $("#gradeSelect")?.value || "") {
+  return grade === "七年级" ? GRADE_SEVEN_GRADING_HINT : DEFAULT_GRADING_HINT;
+}
+
+function isSystemGradingHint(value) {
+  const hint = String(value || "").trim();
+  return [DEFAULT_GRADING_HINT, GRADE_SEVEN_GRADING_HINT, PREVIOUS_SHARED_GRADING_HINT].includes(hint);
+}
+
+function syncSystemGradingHintForSelectedGrade() {
+  const input = $("#gradingHintInput");
+  const currentHint = String(input?.value || state.gradingHint || "").trim();
+  if (currentHint && !isSystemGradingHint(currentHint)) return;
+
+  const defaultHint = getDefaultGradingHintForGrade();
+  state.gradingHint = defaultHint;
+  if (input) input.value = defaultHint;
+  syncCurrentQueueItem({ gradingHint: defaultHint });
+}
+
+function getSavedDefaultGradingHint(grade = $("#gradeSelect")?.value || "") {
   const saved = window.localStorage.getItem(GRADING_HINT_STORAGE_KEY);
-  return saved?.trim() ? saved : DEFAULT_GRADING_HINT;
+  return saved?.trim() && !isSystemGradingHint(saved)
+    ? saved
+    : getDefaultGradingHintForGrade(grade);
 }
 
 function getGradingHintForReport() {
-  return ($("#gradingHintInput")?.value || state.gradingHint || DEFAULT_GRADING_HINT).trim() || DEFAULT_GRADING_HINT;
+  const defaultHint = getDefaultGradingHintForGrade();
+  return ($("#gradingHintInput")?.value || state.gradingHint || defaultHint).trim() || defaultHint;
 }
 
 function preferredClientOcrModel(provider) {
@@ -1700,7 +1735,11 @@ function applyQueueItemToWorkspace(item) {
   $("#essayInput").value = essayText;
   state.currentImages = normalizeClientImages(item.imageData || []);
   state.ocrText = item.ocrText || essayText;
-  state.gradingHint = String(item.gradingHint || getSavedDefaultGradingHint());
+  const savedItemHint = String(item.gradingHint || "").trim();
+  state.gradingHint = savedItemHint
+    ? (isSystemGradingHint(savedItemHint) ? getDefaultGradingHintForGrade(item.grade) : savedItemHint)
+    : getSavedDefaultGradingHint(item.grade);
+  item.gradingHint = state.gradingHint;
   $("#gradingHintInput").value = state.gradingHint;
   state.currentReport = item.report || null;
   renderImageWorkspace();
