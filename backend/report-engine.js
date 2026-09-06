@@ -42,7 +42,10 @@ function normalizeModelReport(input) {
   const modelReport = input.modelReport || {};
   const requirements = normalizeModelRequirements(modelReport.requirements, prompt.requirements);
   const scores = normalizeModelScores(modelReport.scores);
-  const annotations = normalizeModelAnnotations(modelReport.annotations, essay);
+  const modelAnnotations = normalizeModelAnnotations(modelReport.annotations, essay);
+  const annotations = modelAnnotations.length
+    ? modelAnnotations
+    : buildAnnotations(prompt, analysis).filter((item) => item.original && item.comment && item.suggestion);
   const guide = normalizeModelGuide(modelReport.guide);
   const polished = String(modelReport.polished || "").trim();
   const polishedItems = normalizeModelPolishedItems(modelReport.polishedItems, essay);
@@ -217,17 +220,135 @@ function normalizeModelScores(scores) {
 }
 
 function normalizeModelAnnotations(items, essay) {
-  if (!Array.isArray(items)) return [];
-  return items.map((item) => {
-    const original = String(item.original || "").trim();
+  const sourceItems = collectModelAnnotationItems(items);
+  return sourceItems.map((item) => {
+    const entry = typeof item === "object" && item !== null ? item : {};
+    const original = resolveAnnotationOriginal(
+      entry.original
+        || entry.quote
+        || entry.source
+        || entry.sourceText
+        || entry.sentence
+        || entry.evidence
+        || entry["原句"]
+        || entry["原文"],
+      essay
+    );
+    const type = String(entry.type || entry.category || entry["类型"] || "润色").trim();
     return {
-      type: String(item.type || "润色").trim(),
-      tone: /佳句/.test(String(item.type || "")) || item.tone === "red" ? "red" : "blue",
+      type,
+      tone: /佳句/.test(type) || entry.tone === "red" ? "red" : "blue",
       original,
-      comment: String(item.comment || "").trim(),
-      suggestion: String(item.suggestion || "").trim()
+      comment: String(
+        entry.comment
+          || entry.problem
+          || entry.analysis
+          || entry.reason
+          || entry.note
+          || entry["点评"]
+          || entry["问题"]
+          || ""
+      ).trim(),
+      suggestion: String(
+        entry.suggestion
+          || entry.advice
+          || entry.revision
+          || entry.recommendation
+          || entry.fix
+          || entry["建议"]
+          || entry["修改建议"]
+          || ""
+      ).trim()
     };
-  }).filter((item) => item.original && item.comment && item.suggestion && originalExistsInEssay(item.original, essay));
+  }).filter((item) => item.original && item.comment && item.suggestion);
+}
+
+function collectModelAnnotationItems(items) {
+  if (Array.isArray(items)) return items;
+  if (!items || typeof items !== "object") return [];
+  const candidates = [items.items, items.annotations, items.comments, items.details, items.results];
+  return candidates.find(Array.isArray) || [];
+}
+
+function resolveAnnotationOriginal(value, essay) {
+  const original = cleanAnnotationOriginal(value);
+  if (!original) return "";
+  if (essay.includes(original)) return original;
+
+  const comparableOriginal = normalizeComparableText(original);
+  if (comparableOriginal.length < 4) return "";
+  const comparableMatch = findComparableSourceFragment(essay, comparableOriginal);
+  if (comparableMatch) return comparableMatch;
+
+  const fragments = extractEssayFragments(essay);
+  let best = null;
+  fragments.forEach((fragment) => {
+    const comparableFragment = normalizeComparableText(fragment);
+    if (comparableFragment.length < 4) return;
+    const lengthRatio = Math.min(comparableOriginal.length, comparableFragment.length)
+      / Math.max(comparableOriginal.length, comparableFragment.length);
+    if (lengthRatio < 0.55) return;
+    const similarity = calculateTextSimilarity(comparableOriginal, comparableFragment);
+    if (!best || similarity > best.similarity) best = { fragment, similarity };
+  });
+  if (!best) return "";
+  const minLength = Math.min(comparableOriginal.length, normalizeComparableText(best.fragment).length);
+  const threshold = minLength >= 8 ? 0.72 : 0.84;
+  return best.similarity >= threshold ? best.fragment : "";
+}
+
+function cleanAnnotationOriginal(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^(?:原句|原文|摘录|引用)\s*[：:]\s*/u, "")
+    .replace(/^[“”"'‘’]+|[“”"'‘’]+$/gu, "")
+    .trim();
+}
+
+function findComparableSourceFragment(essay, comparableTarget) {
+  const source = String(essay || "");
+  let comparable = "";
+  const sourceIndexes = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const normalized = normalizeComparableText(source[index]);
+    if (!normalized) continue;
+    comparable += normalized;
+    sourceIndexes.push(index);
+  }
+  const start = comparable.indexOf(comparableTarget);
+  if (start < 0) return "";
+  const sourceStart = sourceIndexes[start];
+  const sourceEnd = sourceIndexes[start + comparableTarget.length - 1];
+  return source.slice(sourceStart, sourceEnd + 1).trim();
+}
+
+function extractEssayFragments(essay) {
+  const source = String(essay || "");
+  const fragments = source.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [];
+  return fragments.map((item) => item.trim()).filter((item) => normalizeComparableText(item).length >= 4);
+}
+
+function calculateTextSimilarity(left, right) {
+  const maxLength = Math.max(left.length, right.length);
+  if (!maxLength) return 1;
+  return 1 - levenshteinDistance(left, right) / maxLength;
+}
+
+function levenshteinDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitution = previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1);
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        substitution
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
 }
 
 function normalizeModelGuide(items) {
