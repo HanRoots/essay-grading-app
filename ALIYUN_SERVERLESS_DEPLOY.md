@@ -75,6 +75,7 @@ APP_USERNAME=teacher
 APP_PASSWORD=请换成长随机密码
 OSS_REGION=oss-cn-hangzhou
 OSS_BUCKET=你的私有Bucket名称
+OSS_INTERNAL_ENDPOINT=https://oss-cn-hangzhou-internal.aliyuncs.com
 OSS_DATA_OBJECT=essay-grading/data/app-data.json
 OSS_ASSET_PREFIX=essay-grading/assets
 OSS_SIGNED_URL_TTL_SECONDS=21600
@@ -83,6 +84,8 @@ KIMI_API_KEY=你的Kimi密钥
 TZ=Asia/Shanghai
 CORS_ALLOWED_ORIGINS=https://你的GitHub用户名.github.io
 ```
+
+`OSS_INTERNAL_ENDPOINT` 只供同地域 FC 在服务端读取、写入和删除对象，避免任务数据经 OSS 外网端点反复传输。浏览器需要使用的图片直传和查看链接仍由程序签发外网 URL，因此不要把 `OSS_PUBLIC_ENDPOINT` 配成内网地址。
 
 只配置实际使用的模型密钥即可。网页中的 API Key 输入框在云端模式会锁定，避免老师误把密钥保存在浏览器或任务数据中。
 

@@ -3,10 +3,17 @@ const crypto = require("crypto");
 const DEFAULT_ASSET_PREFIX = "essay-grading/assets";
 const DEFAULT_SIGNED_URL_TTL_SECONDS = 6 * 60 * 60;
 
-let client = null;
+let serverClient = null;
+let publicClient = null;
 
 function setClientForTests(nextClient) {
-  client = nextClient;
+  serverClient = nextClient;
+  publicClient = nextClient;
+}
+
+function setClientsForTests(nextClients = {}) {
+  serverClient = nextClients.serverClient || null;
+  publicClient = nextClients.publicClient || null;
 }
 
 function isOssEnabled() {
@@ -20,7 +27,8 @@ function getOssConfig() {
     accessKeyId: String(process.env.OSS_ACCESS_KEY_ID || process.env.ALIBABA_CLOUD_ACCESS_KEY_ID || "").trim(),
     accessKeySecret: String(process.env.OSS_ACCESS_KEY_SECRET || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET || "").trim(),
     stsToken: String(process.env.OSS_STS_TOKEN || process.env.ALIBABA_CLOUD_SECURITY_TOKEN || "").trim(),
-    endpoint: String(process.env.OSS_ENDPOINT || "").trim(),
+    publicEndpoint: String(process.env.OSS_PUBLIC_ENDPOINT || process.env.OSS_ENDPOINT || "").trim(),
+    internalEndpoint: String(process.env.OSS_INTERNAL_ENDPOINT || "").trim(),
     secure: true,
     authorizationV4: true
   };
@@ -31,9 +39,7 @@ function getOssConfig() {
   return config;
 }
 
-function getClient() {
-  if (!isOssEnabled()) return null;
-  if (client) return client;
+function createClient(endpoint) {
   let OSS;
   try {
     OSS = require("ali-oss");
@@ -41,17 +47,32 @@ function getClient() {
     throw new Error("云端模式需要安装 ali-oss 依赖，请先执行 npm install");
   }
   const config = getOssConfig();
-  client = new OSS({
+  return new OSS({
     region: config.region,
     bucket: config.bucket,
     accessKeyId: config.accessKeyId,
     accessKeySecret: config.accessKeySecret,
     stsToken: config.stsToken || undefined,
-    endpoint: config.endpoint || undefined,
+    endpoint: endpoint || undefined,
     secure: true,
     authorizationV4: true
   });
-  return client;
+}
+
+function getServerClient() {
+  if (!isOssEnabled()) return null;
+  if (serverClient) return serverClient;
+  const config = getOssConfig();
+  serverClient = createClient(config.internalEndpoint || config.publicEndpoint);
+  return serverClient;
+}
+
+function getPublicClient() {
+  if (!isOssEnabled()) return null;
+  if (publicClient) return publicClient;
+  const config = getOssConfig();
+  publicClient = createClient(config.publicEndpoint);
+  return publicClient;
 }
 
 function getStorageRuntimeInfo() {
@@ -64,12 +85,12 @@ function getStorageRuntimeInfo() {
 }
 
 async function getObjectBuffer(objectKey) {
-  const result = await getClient().get(assertObjectKey(objectKey));
+  const result = await getServerClient().get(assertObjectKey(objectKey));
   return Buffer.isBuffer(result.content) ? result.content : Buffer.from(result.content || "");
 }
 
 async function putObjectBuffer(objectKey, content, contentType = "application/octet-stream") {
-  const result = await getClient().put(assertObjectKey(objectKey), Buffer.from(content), {
+  const result = await getServerClient().put(assertObjectKey(objectKey), Buffer.from(content), {
     headers: {
       "Content-Type": contentType,
       "Cache-Control": "private, no-store"
@@ -82,18 +103,18 @@ async function deleteObjectKeys(objectKeys) {
   const keys = [...new Set((objectKeys || []).filter(Boolean).map(assertObjectKey))];
   if (!isOssEnabled() || !keys.length) return;
   if (keys.length === 1) {
-    await getClient().delete(keys[0]);
+    await getServerClient().delete(keys[0]);
     return;
   }
-  await getClient().deleteMulti(keys, { quiet: true });
+  await getServerClient().deleteMulti(keys, { quiet: true });
 }
 
 async function createSignedGetUrl(objectKey, expires = getSignedGetUrlTtl()) {
-  return getClient().signatureUrlV4("GET", expires, { headers: {} }, assertObjectKey(objectKey));
+  return getPublicClient().signatureUrlV4("GET", expires, { headers: {} }, assertObjectKey(objectKey));
 }
 
 async function createSignedPutUrl(objectKey, expires = 15 * 60) {
-  return getClient().signatureUrlV4("PUT", expires, { headers: {} }, assertObjectKey(objectKey));
+  return getPublicClient().signatureUrlV4("PUT", expires, { headers: {} }, assertObjectKey(objectKey));
 }
 
 async function createImageUploadSlots(files) {
@@ -225,6 +246,7 @@ function assertObjectKey(value) {
 
 module.exports = {
   _setClientForTests: setClientForTests,
+  _setClientsForTests: setClientsForTests,
   collectImageObjectKeys,
   createImageUploadSlots,
   deleteObjectKeys,

@@ -1,6 +1,8 @@
 const promptLibrary = [];
 const MAX_IMAGE_PAGES = 12;
-const QUEUE_POLL_INTERVAL_MS = 3000;
+// Tasks are saved immediately after edits. A low-frequency foreground refresh
+// keeps another teacher's changes visible without repeatedly reading OSS.
+const QUEUE_POLL_INTERVAL_MS = 60 * 1000;
 const AUTOSAVE_DEBOUNCE_MS = 650;
 const LOCAL_DRAFT_ID_PREFIX = "draft-";
 const CAPTURE_DRAFT_DB_NAME = "essayCaptureDrafts";
@@ -136,6 +138,7 @@ const state = {
   backendAvailable: false,
   refreshingBootstrap: false,
   queuePollTimer: 0,
+  queueRefreshInFlight: false,
   autosaveTimer: 0,
   autosaveInFlight: false,
   autosaveItems: {},
@@ -294,6 +297,7 @@ function bindDesktopEvents() {
   $("#reportPaper").addEventListener("mousedown", handlePolishFormatButton);
   $("#reportPaper").addEventListener("input", handleEditableReportInput);
   window.addEventListener("pagehide", persistCurrentQueueItemOnPageHide);
+  document.addEventListener("visibilitychange", handleQueuePollingVisibilityChange);
   $("#toggleRequirementEditor").addEventListener("click", () => {
     if (state.customPrompt.active) {
       setGradingStatus("自定义题目可直接在下方修改要求", "pending");
@@ -727,12 +731,29 @@ async function copyAiRecognitionPrompt() {
 }
 
 function startQueuePolling() {
-  if (state.queuePollTimer) return;
+  if (state.queuePollTimer || document.visibilityState !== "visible") return;
   state.queuePollTimer = window.setInterval(refreshQueueFromBackend, QUEUE_POLL_INTERVAL_MS);
 }
 
+function stopQueuePolling() {
+  if (!state.queuePollTimer) return;
+  window.clearInterval(state.queuePollTimer);
+  state.queuePollTimer = 0;
+}
+
+function handleQueuePollingVisibilityChange() {
+  if (document.visibilityState === "hidden") {
+    stopQueuePolling();
+    return;
+  }
+  refreshQueueFromBackend();
+  startQueuePolling();
+}
+
 async function refreshQueueFromBackend() {
+  if (document.visibilityState !== "visible" || state.queueRefreshInFlight) return;
   const requestedTeacherId = state.teacherId;
+  state.queueRefreshInFlight = true;
   try {
     const items = await apiRequest("/api/submissions");
     if (requestedTeacherId !== state.teacherId || state.switchingTeacher) return;
@@ -740,6 +761,8 @@ async function refreshQueueFromBackend() {
     state.backendAvailable = true;
   } catch (error) {
     state.backendAvailable = false;
+  } finally {
+    state.queueRefreshInFlight = false;
   }
 }
 

@@ -29,11 +29,17 @@ const mockClient = {
     names.forEach((name) => objects.delete(name));
   },
   signatureUrlV4(method, expires, options, name) {
+    throw new Error("服务器 OSS 客户端不能用于生成浏览器签名 URL");
+  }
+};
+
+const publicClient = {
+  signatureUrlV4(method, expires, options, name) {
     return `https://test-bucket.oss-cn-hangzhou.aliyuncs.com/${name}?method=${method}&expires=${expires}`;
   }
 };
 
-storage._setClientForTests(mockClient);
+storage._setClientsForTests({ serverClient: mockClient, publicClient });
 
 async function run() {
   assert.deepStrictEqual(storage.getStorageRuntimeInfo(), {
