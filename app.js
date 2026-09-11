@@ -2661,7 +2661,7 @@ function renderUpgrade(report) {
 
 function renderPolished(report) {
   const polishedItems = getPolishedItemsForDisplay(report);
-  const highlighted = buildHighlightedPolishedText(report.polished || "", polishedItems);
+  const highlighted = buildHighlightedPolishedText(report.polished || "", polishedItems, report.essay || "");
   const polishedHtml = report.polishedHtmlOverride || highlighted.html;
   return `
     <div class="report-block">
@@ -2714,34 +2714,167 @@ function formatPlainArticle(text) {
   return escapeHTML(text || "").replace(/\n/g, "<br />");
 }
 
-function buildHighlightedPolishedText(polished, items) {
+function buildHighlightedPolishedText(polished, items, originalEssay = "") {
   const source = String(polished || "");
+  const ranges = collectPolishedNoteRanges(source, items);
+  const notes = ranges.map((range, index) => ({
+    number: index + 1,
+    original: range.item.original,
+    polished: range.item.polished,
+    reason: range.item.reason
+  }));
+  const changes = buildPolishedChangeRuns(originalEssay, source);
+
+  // Older reports may not retain the original essay. Keep their existing
+  // whole-suggestion marking rather than silently removing all highlights.
+  const runs = changes.length || String(originalEssay || "").trim()
+    ? changes
+    : ranges.map((range) => ({ start: range.start, end: range.end }));
+  if (!runs.length) return { html: formatPlainArticle(source) || "暂无润色文章", notes };
+
+  const numberedRuns = attachPolishNotesToRuns(runs, ranges);
+  let cursor = 0;
+  let html = "";
+  numberedRuns.forEach((run) => {
+    html += formatPlainArticle(source.slice(cursor, run.start));
+    const note = run.noteNumber ? ` data-polish-note="${run.noteNumber}"` : "";
+    const superscript = run.showNote ? `<sup>${run.noteNumber}</sup>` : "";
+    html += `<mark class="polished-highlight"${note}>${formatPlainArticle(source.slice(run.start, run.end))}${superscript}</mark>`;
+    cursor = run.end;
+  });
+  html += formatPlainArticle(source.slice(cursor));
+  return { html: html || "暂无润色文章", notes };
+}
+
+function collectPolishedNoteRanges(source, items) {
   const ranges = [];
-  items.forEach((item) => {
+  (items || []).forEach((item) => {
     const range = findPolishedRange(source, item.polished);
     if (!range) return;
     const overlaps = ranges.some((existing) => range.start < existing.end && existing.start < range.end);
     if (!overlaps) ranges.push({ ...range, item });
   });
-  ranges.sort((left, right) => left.start - right.start);
+  return ranges.sort((left, right) => left.start - right.start);
+}
 
-  const notes = [];
-  let cursor = 0;
-  let html = "";
-  ranges.forEach((range, index) => {
-    const number = index + 1;
-    html += escapeHTML(source.slice(cursor, range.start)).replace(/\n/g, "<br />");
-    html += `<mark class="polished-highlight" data-polish-note="${number}">${escapeHTML(source.slice(range.start, range.end)).replace(/\n/g, "<br />")}<sup>${number}</sup></mark>`;
-    cursor = range.end;
-    notes.push({
-      number,
-      original: range.item.original,
-      polished: range.item.polished,
-      reason: range.item.reason
-    });
+function buildPolishedChangeRuns(originalEssay, polishedEssay) {
+  const original = String(originalEssay || "");
+  const polished = String(polishedEssay || "");
+  if (!original.trim() || !polished.trim()) return [];
+
+  const sourceTokens = tokenizePolishDiff(original);
+  const targetTokens = tokenizePolishDiff(polished);
+  if (!sourceTokens.length || !targetTokens.length) return [];
+
+  const maxCells = 1_250_000;
+  if (sourceTokens.length * targetTokens.length > maxCells) {
+    return buildCoarsePolishChangeRun(original, polished);
+  }
+
+  const width = targetTokens.length + 1;
+  const matrix = new Uint16Array((sourceTokens.length + 1) * width);
+  for (let sourceIndex = sourceTokens.length - 1; sourceIndex >= 0; sourceIndex -= 1) {
+    for (let targetIndex = targetTokens.length - 1; targetIndex >= 0; targetIndex -= 1) {
+      const cell = sourceIndex * width + targetIndex;
+      if (sourceTokens[sourceIndex].value === targetTokens[targetIndex].value) {
+        matrix[cell] = matrix[(sourceIndex + 1) * width + targetIndex + 1] + 1;
+      } else {
+        matrix[cell] = Math.max(matrix[(sourceIndex + 1) * width + targetIndex], matrix[sourceIndex * width + targetIndex + 1]);
+      }
+    }
+  }
+
+  const changed = new Array(targetTokens.length).fill(false);
+  let sourceIndex = 0;
+  let targetIndex = 0;
+  while (targetIndex < targetTokens.length) {
+    if (sourceIndex < sourceTokens.length && sourceTokens[sourceIndex].value === targetTokens[targetIndex].value) {
+      sourceIndex += 1;
+      targetIndex += 1;
+    } else if (sourceIndex < sourceTokens.length && matrix[(sourceIndex + 1) * width + targetIndex] >= matrix[sourceIndex * width + targetIndex + 1]) {
+      sourceIndex += 1;
+    } else {
+      changed[targetIndex] = true;
+      targetIndex += 1;
+    }
+  }
+
+  return mergePolishChangeTokens(targetTokens, changed);
+}
+
+function tokenizePolishDiff(text) {
+  const source = String(text || "");
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
+    return Array.from(segmenter.segment(source)).flatMap((part) => splitChineseDiffToken(part.segment, part.index));
+  }
+
+  const tokens = [];
+  let offset = 0;
+  for (const value of Array.from(source)) {
+    tokens.push({ value, start: offset, end: offset + value.length });
+    offset += value.length;
+  }
+  return tokens;
+}
+
+function splitChineseDiffToken(value, start) {
+  if (!/^[\u3400-\u9fff]+$/u.test(value)) {
+    return [{ value, start, end: start + value.length }];
+  }
+
+  const tokens = [];
+  let offset = start;
+  for (const char of Array.from(value)) {
+    tokens.push({ value: char, start: offset, end: offset + char.length });
+    offset += char.length;
+  }
+  return tokens;
+}
+
+function mergePolishChangeTokens(tokens, changed) {
+  const runs = [];
+  tokens.forEach((token, index) => {
+    if (!changed[index]) return;
+    const previous = runs.at(-1);
+    if (previous && previous.end === token.start) {
+      previous.end = token.end;
+    } else {
+      runs.push({ start: token.start, end: token.end });
+    }
   });
-  html += escapeHTML(source.slice(cursor)).replace(/\n/g, "<br />");
-  return { html: html || "暂无润色文章", notes };
+  return runs;
+}
+
+function buildCoarsePolishChangeRun(original, polished) {
+  let prefix = 0;
+  while (prefix < original.length && prefix < polished.length && original[prefix] === polished[prefix]) prefix += 1;
+
+  let suffix = 0;
+  while (
+    suffix < original.length - prefix &&
+    suffix < polished.length - prefix &&
+    original[original.length - suffix - 1] === polished[polished.length - suffix - 1]
+  ) suffix += 1;
+
+  const end = polished.length - suffix;
+  return end > prefix ? [{ start: prefix, end }] : [];
+}
+
+function attachPolishNotesToRuns(runs, ranges) {
+  const lastRunIndexByNote = new Map();
+  const numberedRuns = runs.map((run) => {
+    const noteIndex = ranges.findIndex((range) => run.start < range.end && run.end > range.start);
+    const noteNumber = noteIndex >= 0 ? noteIndex + 1 : null;
+    return { ...run, noteNumber, showNote: false };
+  });
+  numberedRuns.forEach((run, index) => {
+    if (run.noteNumber) lastRunIndexByNote.set(run.noteNumber, index);
+  });
+  numberedRuns.forEach((run, index) => {
+    if (run.noteNumber && lastRunIndexByNote.get(run.noteNumber) === index) run.showNote = true;
+  });
+  return numberedRuns;
 }
 
 function findPolishedRange(text, needle) {
