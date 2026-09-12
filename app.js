@@ -5,6 +5,7 @@ const MAX_IMAGE_PAGES = 12;
 const QUEUE_POLL_INTERVAL_MS = 60 * 1000;
 const AUTOSAVE_DEBOUNCE_MS = 650;
 const LOCAL_DRAFT_ID_PREFIX = "draft-";
+const API_CLIENT_INSTANCE_STORAGE_KEY = "essay-grading-api-client-instance";
 const CAPTURE_DRAFT_DB_NAME = "essayCaptureDrafts";
 const CAPTURE_DRAFT_STORE = "drafts";
 const CAPTURE_DRAFT_ID = "active";
@@ -862,6 +863,7 @@ async function apiRequest(path, options = {}) {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(authorization ? { Authorization: authorization } : {}),
       ...(state.teacherId ? { "X-Teacher-Id": state.teacherId } : {}),
+      "X-App-Client-Id": getApiClientInstanceId(),
       ...(options.headers || {})
     },
     body: options.body ? JSON.stringify(options.body) : undefined
@@ -888,6 +890,18 @@ async function apiRequest(path, options = {}) {
 function buildApiUrl(path) {
   if (!API_BASE_URL || !String(path).startsWith("/api/")) return path;
   return `${API_BASE_URL}${path}`;
+}
+
+function getApiClientInstanceId() {
+  try {
+    const existing = window.sessionStorage.getItem(API_CLIENT_INSTANCE_STORAGE_KEY);
+    if (existing) return existing;
+    const generated = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    window.sessionStorage.setItem(API_CLIENT_INSTANCE_STORAGE_KEY, generated);
+    return generated;
+  } catch (error) {
+    return "current-client";
+  }
 }
 
 function readApiAuthorization() {

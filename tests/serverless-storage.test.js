@@ -9,8 +9,10 @@ process.env.OSS_ACCESS_KEY_SECRET = "test-access-secret";
 const storage = require("../backend/oss-storage");
 
 const objects = new Map();
+let getObjectCalls = 0;
 const mockClient = {
   async get(name) {
+    getObjectCalls += 1;
     if (!objects.has(name)) {
       const error = new Error("not found");
       error.status = 404;
@@ -75,9 +77,13 @@ async function run() {
   const materializedImages = await storage.materializeImageList(persistedImages);
   assert.strictEqual(materializedImages[0].dataUrl, pageDataUrl);
 
-  const { readData, updateData } = require("../backend/data-store");
+  const { readData, updateData, _clearOssDataCacheForTests } = require("../backend/data-store");
+  _clearOssDataCacheForTests();
   const seed = await readData();
   assert.ok(Array.isArray(seed.promptLibrary));
+  const readsAfterSeed = getObjectCalls;
+  await readData();
+  assert.strictEqual(getObjectCalls, readsAfterSeed, "consecutive OSS reads should use the short-lived cache");
   await updateData((data) => {
     const oldPrompt = data.promptLibrary.find((item) => item.id === "g3a-u3");
     Object.assign(oldPrompt, {

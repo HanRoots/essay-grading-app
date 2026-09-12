@@ -7,6 +7,7 @@ const { URL } = require("url");
 const { findPrompt, publicModelConfig, readData, resetRuntimeWorkspaceData, updateData } = require("./data-store");
 const { gradeEssayReport, recognizeEssayText, testCompatibleModelConnection } = require("./model-client");
 const { normalizeModelReport } = require("./report-engine");
+const { createLegacyQueueRefreshGuard, getLegacyQueueRefreshKey } = require("./queue-refresh-guard");
 const {
   TASK_RETENTION_DAYS,
   getTaskExpiresAt,
@@ -35,6 +36,7 @@ const RESET_WORKSPACE_ON_START = !isOssEnabled() && (process.env.RESET_WORKSPACE
 let startupReset = null;
 let lastRetentionSweepAt = 0;
 let retentionSweepPromise = null;
+const legacyQueueRefreshGuard = createLegacyQueueRefreshGuard();
 const STARTUP_READY = RESET_WORKSPACE_ON_START
   ? resetRuntimeWorkspaceData().then((result) => {
       startupReset = result;
@@ -281,6 +283,16 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/submissions") {
+    const refreshLimit = legacyQueueRefreshGuard.check(getLegacyQueueRefreshKey(req));
+    if (refreshLimit.limited) {
+      sendJson(res, 429, {
+        error: "refresh_rate_limited",
+        message: "请刷新页面以加载最新版本"
+      }, {
+        "Retry-After": String(refreshLimit.retryAfterSeconds)
+      });
+      return;
+    }
     const data = await readData();
     const teacherId = getRequestTeacherId(req, data);
     sendJson(res, 200, data.queueItems.filter((item) => itemBelongsToTeacher(item, teacherId, data.teacherProfiles)).map(toQueueSummary));
@@ -1081,10 +1093,11 @@ function buildOcrSuccessMessage(result, imageCount) {
   return `${base}，请老师确认后批改`;
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...headers
   });
   res.end(JSON.stringify(payload, null, 2));
 }

@@ -13,8 +13,11 @@ const DEEPSEEK_LEGACY_MODEL_ALIASES = {
   "deepseek-reasoner": "deepseek-v4-flash"
 };
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
+const OSS_DATA_CACHE_TTL_MS = 60 * 1000;
 
 let dataOperationQueue = Promise.resolve();
+let cachedOssData = null;
+let cachedOssDataAt = 0;
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -75,13 +78,18 @@ async function resetRuntimeWorkspaceData() {
 async function readDataUnlocked() {
   let data;
   if (isOssEnabled()) {
-    try {
-      const content = await getObjectBuffer(DATA_OBJECT_KEY);
-      data = JSON.parse(content.toString("utf8"));
-    } catch (error) {
-      if (!isMissingObjectError(error)) throw error;
-      data = createSeedData();
-      await writeDataUnlocked(data);
+    if (hasFreshOssDataCache()) {
+      data = cloneData(cachedOssData);
+    } else {
+      try {
+        const content = await getObjectBuffer(DATA_OBJECT_KEY);
+        data = JSON.parse(content.toString("utf8"));
+      } catch (error) {
+        if (!isMissingObjectError(error)) throw error;
+        data = createSeedData();
+        await writeDataUnlocked(data);
+      }
+      cacheOssData(data);
     }
   } else {
     data = readLocalData();
@@ -96,9 +104,24 @@ async function writeDataUnlocked(data) {
   const persisted = sanitizeDataForPersistence(data);
   if (isOssEnabled()) {
     await putObjectBuffer(DATA_OBJECT_KEY, Buffer.from(JSON.stringify(persisted, null, 2), "utf8"), "application/json; charset=utf-8");
+    cacheOssData(persisted);
   } else {
     writeLocalData(persisted);
   }
+}
+
+function hasFreshOssDataCache() {
+  return cachedOssData && Date.now() - cachedOssDataAt < OSS_DATA_CACHE_TTL_MS;
+}
+
+function cacheOssData(data) {
+  cachedOssData = cloneData(data);
+  cachedOssDataAt = Date.now();
+}
+
+function clearOssDataCacheForTests() {
+  cachedOssData = null;
+  cachedOssDataAt = 0;
 }
 
 function enqueueDataOperation(operation) {
@@ -375,6 +398,7 @@ module.exports = {
   publicModelConfig,
   readData,
   resetRuntimeWorkspaceData,
+  _clearOssDataCacheForTests: clearOssDataCacheForTests,
   updateData,
   writeData
 };
