@@ -14,7 +14,8 @@
     "test:serverless": "node tests/serverless-storage.test.js && node tests/workspace-policy.test.js",
     "test:report-engine": "node tests/report-engine.test.js",
     "test:polish-diff": "node tests/polish-diff.test.js",
-    "test:queue-refresh": "node tests/queue-refresh-guard.test.js"
+    "test:queue-refresh": "node tests/queue-refresh-guard.test.js",
+    "test:cors": "node tests/cors-client-header.test.js"
   },
   "dependencies": {
     "ali-oss": "6.23.0"

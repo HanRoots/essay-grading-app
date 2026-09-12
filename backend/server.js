@@ -47,6 +47,7 @@ const PUBLIC_FILES = new Set(["/", "/index.html", "/styles.css", "/runtime-confi
 const MAX_IMAGE_PAGES = 12;
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024;
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
+const CORS_ALLOWED_HEADERS = "Authorization, Content-Type, X-Teacher-Id, X-App-Client-Id";
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -678,7 +679,7 @@ function applyCors(req, res) {
   if (originAllowed) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Teacher-Id");
+    res.setHeader("Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
     res.setHeader("Access-Control-Max-Age", "600");
     res.setHeader("Vary", "Origin");
   }
