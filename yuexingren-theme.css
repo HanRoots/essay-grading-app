@@ -395,6 +395,24 @@
     box-shadow: none;
   }
 
+  .queue-panel .queue-list {
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+
+  .queue-panel .queue-item {
+    min-height: 104px;
+  }
+
+  .queue-panel .queue-item-main {
+    padding: 14px 8px 15px 16px;
+  }
+
+  .queue-panel .queue-item-footer {
+    min-height: 22px;
+    margin-top: 10px;
+  }
+
   .task-list-item:hover,
   .queue-item:hover {
     border-color: #aac0dd;
