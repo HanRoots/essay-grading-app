@@ -43,7 +43,17 @@ const STARTUP_READY = RESET_WORKSPACE_ON_START
       return result;
     })
   : Promise.resolve(null);
-const PUBLIC_FILES = new Set(["/", "/index.html", "/styles.css", "/runtime-config.js", "/app.js"]);
+const PUBLIC_FILES = new Set([
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/yuexingren-theme.css",
+  "/runtime-config.js",
+  "/app.js",
+  "/MiSans-Regular.ttf",
+  "/MiSansLatin-Regular.ttf",
+  "/yuexingren-logo-mark.png"
+]);
 const MAX_IMAGE_PAGES = 12;
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024;
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
@@ -56,7 +66,8 @@ const MIME_TYPES = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
-  ".svg": "image/svg+xml"
+  ".svg": "image/svg+xml",
+  ".ttf": "font/ttf"
 };
 
 const server = http.createServer(async (req, res) => {

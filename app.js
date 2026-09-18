@@ -2505,7 +2505,7 @@ function renderOverview(report) {
           <div class="score-card">
             <strong>${item.name}</strong>
             <div class="stars">${starString(item.value)}</div>
-            <p class="eyebrow">${item.note}</p>
+            <p class="eyebrow">${renderScoreNote(item.note)}</p>
           </div>
         `).join("")}
       </div>
@@ -2515,6 +2515,13 @@ function renderOverview(report) {
       <div class="comment-box editable-report-text" data-report-edit="teacherComment">${escapeHTML(report.teacherComment || "模型未返回教师评语，请重新批改。")}</div>
     </div>
   `;
+}
+
+function renderScoreNote(note) {
+  return escapeHTML(note).replace(
+    /(约\s*)(\d+(?:\.\d+)?\/\d+(?:\.\d+)?)(\s*[：:])/,
+    '<span class="score-summary">$1<strong class="score-fraction">$2</strong>$3</span>'
+  );
 }
 
 function renderRequirementRow(item) {
