@@ -241,6 +241,7 @@ async function initDesktopPage() {
 
 function bindDesktopEvents() {
   $("#copyAiRecognitionPromptButton")?.addEventListener("click", copyAiRecognitionPrompt);
+  $("#libraryTableBody")?.addEventListener("click", handleLearningSheetDownload);
   $("#gradeSelect").addEventListener("change", () => {
     populateBookSelect();
     populateUnitSelect();
@@ -4536,7 +4537,7 @@ function renderLibraryTable() {
   if (!sortedPrompts.length) {
     body.innerHTML = `
       <tr>
-        <td colspan="6">题库未加载，请确认本地服务正在运行后刷新页面。</td>
+        <td colspan="7">题库未加载，请确认本地服务正在运行后刷新页面。</td>
       </tr>
     `;
     return;
@@ -4547,10 +4548,87 @@ function renderLibraryTable() {
       <td>${item.book}</td>
       <td>${item.unit}</td>
       <td>${item.title}</td>
+      <td class="learning-sheet-cell">${renderLearningSheetControl(item)}</td>
       <td>${item.type}</td>
       <td><span class="quality-pill">${item.status}</span></td>
     </tr>
   `).join("");
+}
+
+function renderLearningSheetControl(item) {
+  if (!item.learningSheet?.available) {
+    return '<span class="learning-sheet-unavailable">暂无学习单</span>';
+  }
+  const formats = Array.isArray(item.learningSheet.formats) ? item.learningSheet.formats : [];
+  const options = formats.map((format) => (
+    `<option value="${format}">${format === "docx" ? "Word" : "PDF"}</option>`
+  )).join("");
+  return `
+    <div class="learning-sheet-control">
+      <select class="learning-sheet-format" aria-label="${escapeHTML(item.title)}学习单格式">
+        ${options}
+      </select>
+      <button
+        class="learning-sheet-download-button"
+        type="button"
+        data-learning-sheet-download
+        data-prompt-id="${escapeHTML(item.id)}"
+        aria-label="下载${escapeHTML(item.title)}学习单"
+        title="下载对应学习单"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 20h14" />
+        </svg>
+        <span>下载</span>
+      </button>
+    </div>
+  `;
+}
+
+async function handleLearningSheetDownload(event) {
+  const button = event.target.closest("[data-learning-sheet-download]");
+  if (!button) return;
+  const control = button.closest(".learning-sheet-control");
+  const format = control?.querySelector(".learning-sheet-format")?.value || "pdf";
+  const promptId = button.dataset.promptId || "";
+  const label = button.querySelector("span");
+  const originalLabel = label?.textContent || "下载";
+  button.disabled = true;
+  button.classList.add("is-loading");
+  if (label) label.textContent = "准备中";
+  try {
+    const result = await apiRequest(`/api/prompts/${encodeURIComponent(promptId)}/learning-sheet?format=${encodeURIComponent(format)}`);
+    const rawDownloadUrl = result.url || result.dataUrl;
+    const downloadUrl = String(rawDownloadUrl || "").startsWith("/api/")
+      ? buildApiUrl(rawDownloadUrl)
+      : rawDownloadUrl;
+    if (!downloadUrl) throw new Error("学习单下载地址无效");
+    triggerFileDownload(downloadUrl, result.fileName || `学习单.${format}`);
+    if (label) label.textContent = "已下载";
+  } catch (error) {
+    button.title = error.message || "学习单下载失败";
+    if (label) label.textContent = "重试";
+  } finally {
+    button.classList.remove("is-loading");
+    window.setTimeout(() => {
+      button.disabled = false;
+      button.title = "下载对应学习单";
+      if (label) label.textContent = originalLabel;
+    }, 1400);
+  }
+}
+
+function triggerFileDownload(url, fileName) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function sortedPromptLibrary() {

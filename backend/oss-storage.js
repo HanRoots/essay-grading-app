@@ -89,11 +89,12 @@ async function getObjectBuffer(objectKey) {
   return Buffer.isBuffer(result.content) ? result.content : Buffer.from(result.content || "");
 }
 
-async function putObjectBuffer(objectKey, content, contentType = "application/octet-stream") {
+async function putObjectBuffer(objectKey, content, contentType = "application/octet-stream", options = {}) {
   const result = await getServerClient().put(assertObjectKey(objectKey), Buffer.from(content), {
     headers: {
       "Content-Type": contentType,
-      "Cache-Control": "private, no-store"
+      "Cache-Control": options.cacheControl || "private, no-store",
+      ...(options.contentDisposition ? { "Content-Disposition": options.contentDisposition } : {})
     }
   });
   return result;
@@ -109,8 +110,14 @@ async function deleteObjectKeys(objectKeys) {
   await getServerClient().deleteMulti(keys, { quiet: true });
 }
 
-async function createSignedGetUrl(objectKey, expires = getSignedGetUrlTtl()) {
-  return getPublicClient().signatureUrlV4("GET", expires, { headers: {} }, assertObjectKey(objectKey));
+async function createSignedGetUrl(objectKey, expires = getSignedGetUrlTtl(), options = {}) {
+  const queries = {};
+  if (options.contentDisposition) queries["response-content-disposition"] = options.contentDisposition;
+  if (options.contentType) queries["response-content-type"] = options.contentType;
+  return getPublicClient().signatureUrlV4("GET", expires, {
+    headers: {},
+    ...(Object.keys(queries).length ? { queries } : {})
+  }, assertObjectKey(objectKey));
 }
 
 async function createSignedPutUrl(objectKey, expires = 15 * 60) {
@@ -249,6 +256,7 @@ module.exports = {
   _setClientsForTests: setClientsForTests,
   collectImageObjectKeys,
   createImageUploadSlots,
+  createSignedGetUrl,
   deleteObjectKeys,
   getObjectBuffer,
   getStorageRuntimeInfo,

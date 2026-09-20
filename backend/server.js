@@ -9,6 +9,12 @@ const { gradeEssayReport, recognizeEssayText, testCompatibleModelConnection } = 
 const { normalizeModelReport } = require("./report-engine");
 const { createLegacyQueueRefreshGuard, getLegacyQueueRefreshKey } = require("./queue-refresh-guard");
 const {
+  buildAttachmentDisposition,
+  getLearningSheetAsset,
+  resolveLocalLearningSheetPath,
+  withLearningSheetAvailability
+} = require("./learning-sheet-catalog");
+const {
   TASK_RETENTION_DAYS,
   getTaskExpiresAt,
   itemBelongsToTeacher,
@@ -19,6 +25,7 @@ const {
 const {
   collectImageObjectKeys,
   createImageUploadSlots,
+  createSignedGetUrl,
   deleteObjectKeys,
   getStorageRuntimeInfo,
   hydrateImageListForClient,
@@ -31,6 +38,7 @@ const PORT = Number(process.env.PORT || process.env.FC_CUSTOM_LISTEN_PORT || 878
 const ROOT_DIR = path.join(__dirname, "..");
 const SERVER_SESSION_ID = `${Date.now()}-${process.pid}`;
 const SERVER_STARTED_AT = new Date().toISOString();
+const LOCAL_DOWNLOAD_SECRET = crypto.randomBytes(32);
 const RETENTION_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const RESET_WORKSPACE_ON_START = !isOssEnabled() && (process.env.RESET_WORKSPACE_ON_START === "1" || process.argv.includes("--reset-session"));
 let startupReset = null;
@@ -120,6 +128,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/learning-sheet-download") {
+    await sendLocalLearningSheetDownload(res, url);
+    return;
+  }
+
   await sweepExpiredWorkspaceItems();
 
   if (req.method === "GET" && url.pathname === "/api/network-info") {
@@ -141,7 +154,7 @@ async function handleApi(req, res, url) {
     const teacherId = getRequestTeacherId(req, data);
     sendJson(res, 200, {
       runtime: getRuntimeInfo(),
-      promptLibrary: data.promptLibrary,
+      promptLibrary: withLearningSheetAvailability(data.promptLibrary),
       modelProviders: data.modelProviders,
       teacherProfiles: data.teacherProfiles,
       activeTeacherId: teacherId,
@@ -170,7 +183,53 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/prompts") {
-    sendJson(res, 200, (await readData()).promptLibrary);
+    sendJson(res, 200, withLearningSheetAvailability((await readData()).promptLibrary));
+    return;
+  }
+
+  const learningSheetMatch = url.pathname.match(/^\/api\/prompts\/([^/]+)\/learning-sheet$/);
+  if (req.method === "GET" && learningSheetMatch) {
+    const promptId = decodeURIComponent(learningSheetMatch[1]);
+    const format = String(url.searchParams.get("format") || "pdf").toLowerCase();
+    if (!new Set(["pdf", "docx"]).has(format)) {
+      sendJson(res, 400, {
+        error: "learning_sheet_format_invalid",
+        message: "学习单格式只支持 PDF 或 Word"
+      });
+      return;
+    }
+    const asset = getLearningSheetAsset(promptId, format);
+    if (!asset) {
+      sendJson(res, 404, {
+        error: "learning_sheet_unavailable",
+        message: "这道题暂时没有已核对的学习单"
+      });
+      return;
+    }
+    if (isOssEnabled()) {
+      sendJson(res, 200, {
+        fileName: asset.fileName,
+        format: asset.format,
+        url: await createSignedGetUrl(asset.objectKey, 15 * 60, {
+          contentDisposition: buildAttachmentDisposition(asset.fileName, `${asset.promptId}.${asset.format}`),
+          contentType: asset.contentType
+        })
+      });
+      return;
+    }
+    const filePath = resolveLocalLearningSheetPath(asset);
+    if (!filePath || !fs.existsSync(filePath)) {
+      sendJson(res, 404, {
+        error: "learning_sheet_file_missing",
+        message: "本机尚未安装这份学习单文件"
+      });
+      return;
+    }
+    sendJson(res, 200, {
+      fileName: asset.fileName,
+      format: asset.format,
+      url: createLocalLearningSheetDownloadUrl(asset.promptId, asset.format)
+    });
     return;
   }
 
@@ -707,6 +766,7 @@ function applyCors(req, res) {
 
 function ensureAuthorized(req, res) {
   if (String(req.url || "").split("?")[0] === "/api/health") return true;
+  if (!isOssEnabled() && isValidLocalLearningSheetDownloadRequest(req)) return true;
   const password = String(process.env.APP_PASSWORD || "");
   if (!password) {
     if (isOssEnabled() && process.env.ALLOW_INSECURE_PUBLIC_ACCESS !== "1") {
@@ -738,6 +798,59 @@ function ensureAuthorized(req, res) {
   });
   res.end("需要教师账号登录");
   return false;
+}
+
+function createLocalLearningSheetDownloadUrl(promptId, format, ttlSeconds = 15 * 60) {
+  const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `${promptId}\n${format}\n${expires}`;
+  const token = crypto.createHmac("sha256", LOCAL_DOWNLOAD_SECRET).update(payload).digest("hex");
+  const params = new URLSearchParams({ promptId, format, expires: String(expires), token });
+  return `/api/learning-sheet-download?${params.toString()}`;
+}
+
+function isValidLocalLearningSheetDownloadRequest(req) {
+  try {
+    const url = new URL(req.url, "http://localhost");
+    if (url.pathname !== "/api/learning-sheet-download") return false;
+    return isValidLocalLearningSheetDownloadUrl(url);
+  } catch (error) {
+    return false;
+  }
+}
+
+function isValidLocalLearningSheetDownloadUrl(url) {
+  const promptId = String(url.searchParams.get("promptId") || "");
+  const format = String(url.searchParams.get("format") || "").toLowerCase();
+  const expires = Number(url.searchParams.get("expires") || 0);
+  const suppliedToken = String(url.searchParams.get("token") || "");
+  if (!promptId || !getLearningSheetAsset(promptId, format) || !Number.isInteger(expires)) return false;
+  if (expires < Math.floor(Date.now() / 1000)) return false;
+  const payload = `${promptId}\n${format}\n${expires}`;
+  const expectedToken = crypto.createHmac("sha256", LOCAL_DOWNLOAD_SECRET).update(payload).digest("hex");
+  return safeEqual(suppliedToken, expectedToken);
+}
+
+async function sendLocalLearningSheetDownload(res, url) {
+  if (isOssEnabled() || !isValidLocalLearningSheetDownloadUrl(url)) {
+    sendJson(res, 403, { error: "learning_sheet_download_denied", message: "学习单下载地址已失效" });
+    return;
+  }
+  const promptId = String(url.searchParams.get("promptId") || "");
+  const format = String(url.searchParams.get("format") || "").toLowerCase();
+  const asset = getLearningSheetAsset(promptId, format);
+  const filePath = resolveLocalLearningSheetPath(asset);
+  if (!filePath || !fs.existsSync(filePath)) {
+    sendJson(res, 404, { error: "learning_sheet_file_missing", message: "本机尚未安装这份学习单文件" });
+    return;
+  }
+  const stat = await fs.promises.stat(filePath);
+  res.writeHead(200, {
+    "Content-Type": asset.contentType,
+    "Content-Length": stat.size,
+    "Content-Disposition": buildAttachmentDisposition(asset.fileName, `${asset.promptId}.${asset.format}`),
+    "Cache-Control": "private, no-store"
+  });
+  fs.createReadStream(filePath).pipe(res);
 }
 
 function safeEqual(left, right) {

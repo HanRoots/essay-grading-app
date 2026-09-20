@@ -10,6 +10,7 @@ const storage = require("../backend/oss-storage");
 
 const objects = new Map();
 let getObjectCalls = 0;
+let lastPutOptions = null;
 const mockClient = {
   async get(name) {
     getObjectCalls += 1;
@@ -20,7 +21,8 @@ const mockClient = {
     }
     return { content: Buffer.from(objects.get(name)) };
   },
-  async put(name, content) {
+  async put(name, content, options) {
+    lastPutOptions = options;
     objects.set(name, Buffer.from(content));
     return { name };
   },
@@ -37,7 +39,9 @@ const mockClient = {
 
 const publicClient = {
   signatureUrlV4(method, expires, options, name) {
-    return `https://test-bucket.oss-cn-hangzhou.aliyuncs.com/${name}?method=${method}&expires=${expires}`;
+    const params = new URLSearchParams({ method, expires: String(expires) });
+    Object.entries(options?.queries || {}).forEach(([key, value]) => params.set(key, value));
+    return `https://test-bucket.oss-cn-hangzhou.aliyuncs.com/${name}?${params.toString()}`;
   }
 };
 
@@ -58,6 +62,19 @@ async function run() {
   assert.strictEqual(uploadSlots.length, 2);
   assert.notStrictEqual(uploadSlots[0].storageKey, uploadSlots[1].storageKey);
   assert.match(uploadSlots[0].uploadUrl, /^https:\/\//);
+  const learningSheetUrl = await storage.createSignedGetUrl("essay-grading/learning-sheets/g3a-u1.pdf", 900, {
+    contentDisposition: "attachment; filename=\"g3a-u1.pdf\"",
+    contentType: "application/pdf"
+  });
+  assert.match(learningSheetUrl, /^https:\/\//);
+  assert.match(learningSheetUrl, /response-content-disposition=attachment/);
+  assert.match(learningSheetUrl, /response-content-type=application%2Fpdf/);
+
+  await storage.putObjectBuffer("essay-grading/learning-sheets/test.pdf", Buffer.from("pdf"), "application/pdf", {
+    contentDisposition: "attachment; filename=\"test.pdf\""
+  });
+  assert.strictEqual(lastPutOptions.headers["Content-Type"], "application/pdf");
+  assert.strictEqual(lastPutOptions.headers["Content-Disposition"], "attachment; filename=\"test.pdf\"");
 
   const pageContent = Buffer.from("serverless-image-test");
   const pageDataUrl = `data:image/jpeg;base64,${pageContent.toString("base64")}`;
