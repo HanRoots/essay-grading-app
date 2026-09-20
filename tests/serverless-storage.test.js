@@ -63,12 +63,10 @@ async function run() {
   assert.notStrictEqual(uploadSlots[0].storageKey, uploadSlots[1].storageKey);
   assert.match(uploadSlots[0].uploadUrl, /^https:\/\//);
   const learningSheetUrl = await storage.createSignedGetUrl("essay-grading/learning-sheets/g3a-u1.pdf", 900, {
-    contentDisposition: "attachment; filename=\"g3a-u1.pdf\"",
-    contentType: "application/pdf"
+    contentDisposition: "attachment; filename=\"g3a-u1.pdf\""
   });
   assert.match(learningSheetUrl, /^https:\/\//);
   assert.match(learningSheetUrl, /response-content-disposition=attachment/);
-  assert.match(learningSheetUrl, /response-content-type=application%2Fpdf/);
 
   await storage.putObjectBuffer("essay-grading/learning-sheets/test.pdf", Buffer.from("pdf"), "application/pdf", {
     contentDisposition: "attachment; filename=\"test.pdf\""

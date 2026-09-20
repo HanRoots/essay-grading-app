@@ -113,7 +113,6 @@ async function deleteObjectKeys(objectKeys) {
 async function createSignedGetUrl(objectKey, expires = getSignedGetUrlTtl(), options = {}) {
   const queries = {};
   if (options.contentDisposition) queries["response-content-disposition"] = options.contentDisposition;
-  if (options.contentType) queries["response-content-type"] = options.contentType;
   return getPublicClient().signatureUrlV4("GET", expires, {
     headers: {},
     ...(Object.keys(queries).length ? { queries } : {})

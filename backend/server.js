@@ -211,8 +211,7 @@ async function handleApi(req, res, url) {
         fileName: asset.fileName,
         format: asset.format,
         url: await createSignedGetUrl(asset.objectKey, 15 * 60, {
-          contentDisposition: buildAttachmentDisposition(asset.fileName, `${asset.promptId}.${asset.format}`),
-          contentType: asset.contentType
+          contentDisposition: buildAttachmentDisposition(asset.fileName, `${asset.promptId}.${asset.format}`)
         })
       });
       return;
