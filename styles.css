@@ -476,6 +476,7 @@ p {
 }
 
 .module-block {
+  min-width: 0;
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -618,7 +619,12 @@ textarea:focus,
 }
 
 .custom-prompt-grid {
-  grid-template-columns: minmax(180px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.7fr) minmax(0, 0.8fr);
+}
+
+.custom-prompt-grid > label,
+.custom-prompt-grid input {
+  min-width: 0;
 }
 
 .custom-prompt-editor textarea {
