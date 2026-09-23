@@ -18,6 +18,7 @@
     "test:report-engine": "node tests/report-engine.test.js",
     "test:polish-diff": "node tests/polish-diff.test.js",
     "test:queue-refresh": "node tests/queue-refresh-guard.test.js",
+    "test:queue-sync": "node tests/frontend-queue-sync.test.js",
     "test:cors": "node tests/cors-client-header.test.js"
   },
   "dependencies": {

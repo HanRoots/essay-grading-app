@@ -85,8 +85,17 @@ function getStorageRuntimeInfo() {
 }
 
 async function getObjectBuffer(objectKey) {
+  const result = await getObjectBufferWithMeta(objectKey);
+  return result.content;
+}
+
+async function getObjectBufferWithMeta(objectKey) {
   const result = await getServerClient().get(assertObjectKey(objectKey));
-  return Buffer.isBuffer(result.content) ? result.content : Buffer.from(result.content || "");
+  const headers = result?.res?.headers || result?.headers || {};
+  return {
+    content: Buffer.isBuffer(result.content) ? result.content : Buffer.from(result.content || ""),
+    etag: String(headers.etag || headers.ETag || result.etag || "")
+  };
 }
 
 async function putObjectBuffer(objectKey, content, contentType = "application/octet-stream", options = {}) {
@@ -94,7 +103,9 @@ async function putObjectBuffer(objectKey, content, contentType = "application/oc
     headers: {
       "Content-Type": contentType,
       "Cache-Control": options.cacheControl || "private, no-store",
-      ...(options.contentDisposition ? { "Content-Disposition": options.contentDisposition } : {})
+      ...(options.contentDisposition ? { "Content-Disposition": options.contentDisposition } : {}),
+      ...(options.ifMatch ? { "If-Match": options.ifMatch } : {}),
+      ...(options.ifNoneMatch ? { "If-None-Match": options.ifNoneMatch } : {})
     }
   });
   return result;
@@ -258,6 +269,7 @@ module.exports = {
   createSignedGetUrl,
   deleteObjectKeys,
   getObjectBuffer,
+  getObjectBufferWithMeta,
   getStorageRuntimeInfo,
   hydrateImageListForClient,
   isOssEnabled,

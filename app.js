@@ -5,6 +5,7 @@ const MAX_IMAGE_PAGES = 12;
 const QUEUE_POLL_INTERVAL_MS = 60 * 1000;
 const AUTOSAVE_DEBOUNCE_MS = 650;
 const LOCAL_DRAFT_ID_PREFIX = "draft-";
+const WORKSPACE_DRAFT_STORAGE_PREFIX = "workspace-queue:";
 const API_CLIENT_INSTANCE_STORAGE_KEY = "essay-grading-api-client-instance";
 const CAPTURE_DRAFT_DB_NAME = "essayCaptureDrafts";
 const CAPTURE_DRAFT_STORE = "drafts";
@@ -140,9 +141,12 @@ const state = {
   refreshingBootstrap: false,
   queuePollTimer: 0,
   queueRefreshInFlight: false,
+  queueMutationVersion: 0,
   autosaveTimer: 0,
   autosaveInFlight: false,
+  autosaveInFlightIds: new Set(),
   autosaveItems: {},
+  workspaceDraftTimers: new Map(),
   networkInfo: null,
   runtime: null,
   annotationObserver: null,
@@ -220,6 +224,7 @@ function redirectFilePageToLocalServer() {
 
 async function initDesktopPage() {
   await loadBackendBootstrap();
+  await restoreWorkspaceQueueDrafts();
   renderTeacherProfiles();
   renderQueue();
   renderLibraryTable();
@@ -745,6 +750,7 @@ function stopQueuePolling() {
 
 function handleQueuePollingVisibilityChange() {
   if (document.visibilityState === "hidden") {
+    persistWorkspaceQueueDraftsLocally();
     stopQueuePolling();
     return;
   }
@@ -755,16 +761,23 @@ function handleQueuePollingVisibilityChange() {
 async function refreshQueueFromBackend() {
   if (document.visibilityState !== "visible" || state.queueRefreshInFlight) return;
   const requestedTeacherId = state.teacherId;
+  const requestedMutationVersion = state.queueMutationVersion;
+  let retryAfterLocalMutation = false;
   state.queueRefreshInFlight = true;
   try {
     const items = await apiRequest("/api/submissions");
     if (requestedTeacherId !== state.teacherId || state.switchingTeacher) return;
+    if (requestedMutationVersion !== state.queueMutationVersion) {
+      retryAfterLocalMutation = true;
+      return;
+    }
     mergeQueueFromServer(Array.isArray(items) ? items : []);
     state.backendAvailable = true;
   } catch (error) {
     state.backendAvailable = false;
   } finally {
     state.queueRefreshInFlight = false;
+    if (retryAfterLocalMutation) window.setTimeout(refreshQueueFromBackend, 0);
   }
 }
 
@@ -799,7 +812,10 @@ function mergeQueueFromServer(serverItems) {
   const newCount = newServerItems.length;
   const incomingItem = newServerItems[0] || null;
   const shouldOpenIncomingItem = shouldAutoOpenIncomingSubmission(currentLocal, currentStillExists, incomingItem);
-  const localDrafts = queueItems.filter((item) => item.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX));
+  const serverIds = new Set(serverItems.map((item) => item.id));
+  const protectedLocalItems = queueItems.filter((item) => (
+    !serverIds.has(item.id) && shouldPreserveLocalQueueItem(item)
+  ));
   const normalized = serverItems.map((item) => {
     if (item.id !== state.currentQueueId || !currentLocal) return item;
     const serverFinished = item.status === "done" && item.report;
@@ -819,7 +835,7 @@ function mergeQueueFromServer(serverItems) {
     };
   });
   const hadCurrent = Boolean(state.currentQueueId);
-  queueItems.splice(0, queueItems.length, ...localDrafts, ...normalized);
+  queueItems.splice(0, queueItems.length, ...protectedLocalItems, ...normalized);
   if (!queueItems.length) {
     if (previousLength) {
       renderAfterQueueRemoval(true, 0);
@@ -844,6 +860,14 @@ function mergeQueueFromServer(serverItems) {
   if (newCount > 0) {
     setGradingStatus(`已同步 ${newCount} 个新任务`, "success");
   }
+}
+
+function shouldPreserveLocalQueueItem(item) {
+  if (!item?.id) return false;
+  if (item.id.startsWith(LOCAL_DRAFT_ID_PREFIX)) return true;
+  if (state.gradingJobs.has(item.id)) return true;
+  if (state.autosaveInFlightIds.has(item.id)) return true;
+  return Object.prototype.hasOwnProperty.call(state.autosaveItems, item.id);
 }
 
 function shouldAutoOpenIncomingSubmission(currentLocal, currentStillExists, incomingItem) {
@@ -1627,6 +1651,12 @@ async function closeQueueItem(id) {
   const [removedItem] = queueItems.splice(index, 1);
   const wasCurrent = state.currentQueueId === id;
   renderAfterQueueRemoval(wasCurrent, index);
+  if (id.startsWith(LOCAL_DRAFT_ID_PREFIX)) {
+    delete state.autosaveItems[id];
+    await clearWorkspaceQueueDraft(id);
+    setOcrStatus("本地草稿已删除", "success");
+    return;
+  }
   if (!state.backendAvailable) {
     setOcrStatus("后端未连接，任务仅在当前页面关闭，刷新后会恢复", "pending");
     return;
@@ -1635,6 +1665,7 @@ async function closeQueueItem(id) {
     await apiRequest(`/api/submissions/${encodeURIComponent(id)}`, {
       method: "DELETE"
     });
+    state.queueMutationVersion += 1;
     setOcrStatus("任务已删除", "success");
   } catch (error) {
     queueItems.splice(Math.min(index, queueItems.length), 0, removedItem);
@@ -1667,6 +1698,10 @@ async function clearAllQueueItems() {
     const result = await apiRequest("/api/submissions", {
       method: "DELETE"
     });
+    state.queueMutationVersion += 1;
+    await Promise.all(removedItems
+      .filter((item) => item.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX))
+      .map((item) => clearWorkspaceQueueDraft(item.id)));
     setOcrStatus(`已清空 ${result.deletedCount ?? removedItems.length} 个任务`, "success");
   } catch (error) {
     queueItems.splice(0, queueItems.length, ...removedItems);
@@ -4155,6 +4190,7 @@ function syncCurrentQueueItem(fields, options = {}) {
     item.imageMeta = item.imageData.map(toClientImageMeta);
     item.images = item.imageData.length;
   }
+  if (item.id.startsWith(LOCAL_DRAFT_ID_PREFIX)) scheduleWorkspaceQueueDraftBackup(item);
   if (options.skipAutosave) return;
   scheduleQueueAutosave(item.id, fields, Boolean(options.immediate));
 }
@@ -4205,6 +4241,7 @@ function createLocalQueueDraft(fields = {}) {
   };
   queueItems.unshift(item);
   state.currentQueueId = id;
+  persistWorkspaceQueueDraftLocally(item);
   renderQueue();
   return item;
 }
@@ -4256,6 +4293,7 @@ async function flushQueueAutosaves() {
     state.autosaveTimer = 0;
   }
   state.autosaveInFlight = true;
+  entries.forEach(([itemId]) => state.autosaveInFlightIds.add(itemId));
   try {
     for (const [itemId, originalFields] of entries) {
       let fields = originalFields;
@@ -4276,6 +4314,15 @@ async function flushQueueAutosaves() {
         });
         const localReport = item.report || null;
         Object.assign(item, saved);
+        state.queueMutationVersion += 1;
+        if (state.autosaveItems[itemId]) {
+          state.autosaveItems[item.id] = {
+            ...(state.autosaveItems[item.id] || {}),
+            ...state.autosaveItems[itemId]
+          };
+          delete state.autosaveItems[itemId];
+        }
+        clearWorkspaceQueueDraft(itemId);
         if (localReport && !item.report) item.report = localReport;
         if (state.currentQueueId === itemId) {
           state.currentQueueId = item.id;
@@ -4290,6 +4337,7 @@ async function flushQueueAutosaves() {
         });
         const localReport = item.report || null;
         Object.assign(item, saved);
+        state.queueMutationVersion += 1;
         if (localReport && !item.report) item.report = localReport;
         if (state.currentQueueId === itemId && Object.prototype.hasOwnProperty.call(fields, "imageData")) {
           state.currentImages = normalizeClientImages(item.imageData || []);
@@ -4310,6 +4358,7 @@ async function flushQueueAutosaves() {
     });
     setGradingStatus("自动保存失败，稍后会继续尝试", "pending");
   } finally {
+    entries.forEach(([itemId]) => state.autosaveInFlightIds.delete(itemId));
     state.autosaveInFlight = false;
     if (Object.keys(state.autosaveItems).length) {
       state.autosaveTimer = window.setTimeout(flushQueueAutosaves, AUTOSAVE_DEBOUNCE_MS * 2);
@@ -4357,7 +4406,12 @@ function buildSubmissionPayload(item) {
 
 function persistCurrentQueueItemOnPageHide() {
   const item = getCurrentQueueItem();
-  if (!state.backendAvailable || !item || item.id.startsWith(LOCAL_DRAFT_ID_PREFIX)) return;
+  if (!item) return;
+  if (item.id.startsWith(LOCAL_DRAFT_ID_PREFIX)) {
+    persistWorkspaceQueueDraftLocally(item);
+    return;
+  }
+  if (!state.backendAvailable) return;
   const payload = JSON.stringify(buildSubmissionPayload(item));
   const authorization = readApiAuthorization();
   window.fetch(buildApiUrl(`/api/submissions/${encodeURIComponent(item.id)}/autosave`), {
@@ -4365,11 +4419,94 @@ function persistCurrentQueueItemOnPageHide() {
     headers: {
       "Content-Type": "application/json",
       ...(authorization ? { Authorization: authorization } : {}),
-      ...(state.teacherId ? { "X-Teacher-Id": state.teacherId } : {})
+      ...(state.teacherId ? { "X-Teacher-Id": state.teacherId } : {}),
+      "X-App-Client-Id": getApiClientInstanceId()
     },
     body: payload,
     keepalive: true
   }).catch(() => {});
+}
+
+function getWorkspaceQueueDraftStorageId(itemId) {
+  return `${WORKSPACE_DRAFT_STORAGE_PREFIX}${itemId}`;
+}
+
+async function persistWorkspaceQueueDraftLocally(item) {
+  if (!item?.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX)) return;
+  const pendingTimer = state.workspaceDraftTimers.get(item.id);
+  if (pendingTimer) window.clearTimeout(pendingTimer);
+  state.workspaceDraftTimers.delete(item.id);
+  const record = {
+    id: getWorkspaceQueueDraftStorageId(item.id),
+    kind: "workspace-queue",
+    teacherId: item.teacherId || state.teacherId,
+    updatedAt: item.updatedAt || new Date().toISOString(),
+    item: {
+      ...item,
+      imageData: normalizeClientImages(item.imageData || [])
+    }
+  };
+  try {
+    await runCaptureDraftStore("readwrite", (store) => store.put(record));
+  } catch (error) {
+    // The normal API autosave remains authoritative when local browser storage is unavailable.
+  }
+}
+
+function scheduleWorkspaceQueueDraftBackup(item) {
+  if (!item?.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX)) return;
+  const pendingTimer = state.workspaceDraftTimers.get(item.id);
+  if (pendingTimer) window.clearTimeout(pendingTimer);
+  state.workspaceDraftTimers.set(item.id, window.setTimeout(() => {
+    persistWorkspaceQueueDraftLocally(item);
+  }, 250));
+}
+
+function persistWorkspaceQueueDraftsLocally() {
+  queueItems
+    .filter((item) => item.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX))
+    .forEach((item) => persistWorkspaceQueueDraftLocally(item));
+}
+
+async function restoreWorkspaceQueueDrafts() {
+  let records = [];
+  try {
+    records = await runCaptureDraftStore("readonly", (store) => store.getAll());
+  } catch (error) {
+    return;
+  }
+  const existingIds = new Set(queueItems.map((item) => item.id));
+  const restored = records
+    .filter((record) => record?.id?.startsWith?.(WORKSPACE_DRAFT_STORAGE_PREFIX))
+    .map((record) => record.item)
+    .filter((item) => (
+      item?.id?.startsWith?.(LOCAL_DRAFT_ID_PREFIX) &&
+      !existingIds.has(item.id) &&
+      (!item.teacherId || item.teacherId === state.teacherId)
+    ))
+    .map((item) => ({
+      ...item,
+      imageData: normalizeClientImages(item.imageData || [])
+    }))
+    .sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+  if (restored.length) queueItems.unshift(...restored);
+  if (restored.length && state.backendAvailable) {
+    restored.forEach((item) => {
+      state.autosaveItems[item.id] = buildSubmissionPayload(item);
+    });
+    flushQueueAutosaves();
+  }
+}
+
+async function clearWorkspaceQueueDraft(itemId) {
+  const pendingTimer = state.workspaceDraftTimers.get(itemId);
+  if (pendingTimer) window.clearTimeout(pendingTimer);
+  state.workspaceDraftTimers.delete(itemId);
+  try {
+    await runCaptureDraftStore("readwrite", (store) => store.delete(getWorkspaceQueueDraftStorageId(itemId)));
+  } catch (error) {
+    // A stale local backup is harmless and can be replaced by the next successful save.
+  }
 }
 
 async function filesToImagePayload(fileList, limit = MAX_IMAGE_PAGES) {

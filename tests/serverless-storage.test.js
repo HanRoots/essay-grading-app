@@ -9,8 +9,11 @@ process.env.OSS_ACCESS_KEY_SECRET = "test-access-secret";
 const storage = require("../backend/oss-storage");
 
 const objects = new Map();
+const objectVersions = new Map();
 let getObjectCalls = 0;
 let lastPutOptions = null;
+let injectDataConflict = false;
+const getEtag = (name) => `\"v${objectVersions.get(name) || 0}\"`;
 const mockClient = {
   async get(name) {
     getObjectCalls += 1;
@@ -19,11 +22,30 @@ const mockClient = {
       error.status = 404;
       throw error;
     }
-    return { content: Buffer.from(objects.get(name)) };
+    return {
+      content: Buffer.from(objects.get(name)),
+      res: { headers: { etag: getEtag(name) } }
+    };
   },
   async put(name, content, options) {
     lastPutOptions = options;
+    if (injectDataConflict && name === "essay-grading/data/app-data.json" && options?.headers?.["If-Match"]) {
+      const external = JSON.parse(objects.get(name).toString("utf8"));
+      external.queueItems.unshift({ id: "q-external", student: "另一实例保存的任务" });
+      objects.set(name, Buffer.from(JSON.stringify(external)));
+      objectVersions.set(name, (objectVersions.get(name) || 0) + 1);
+      injectDataConflict = false;
+    }
+    const ifMatch = options?.headers?.["If-Match"];
+    const ifNoneMatch = options?.headers?.["If-None-Match"];
+    if ((ifMatch && ifMatch !== getEtag(name)) || (ifNoneMatch === "*" && objects.has(name))) {
+      const error = new Error("precondition failed");
+      error.status = 412;
+      error.code = "PreconditionFailed";
+      throw error;
+    }
     objects.set(name, Buffer.from(content));
+    objectVersions.set(name, (objectVersions.get(name) || 0) + 1);
     return { name };
   },
   async delete(name) {
@@ -98,7 +120,7 @@ async function run() {
   assert.ok(Array.isArray(seed.promptLibrary));
   const readsAfterSeed = getObjectCalls;
   await readData();
-  assert.strictEqual(getObjectCalls, readsAfterSeed, "consecutive OSS reads should use the short-lived cache");
+  assert.strictEqual(getObjectCalls, readsAfterSeed + 1, "each OSS read should observe the latest shared state");
   await updateData((data) => {
     const oldPrompt = data.promptLibrary.find((item) => item.id === "g3a-u3");
     Object.assign(oldPrompt, {
@@ -129,6 +151,14 @@ async function run() {
   assert.strictEqual(storedState.modelConfig.apiKey, "");
   assert.strictEqual(storedState.queueItems[0].report.sourceImages, undefined);
   assert.strictEqual(storedState.queueItems[0].report.summary, "test");
+
+  injectDataConflict = true;
+  await updateData((data) => {
+    data.queueItems.unshift({ id: "q-local", student: "当前请求保存的任务" });
+  });
+  const conflictSafeState = JSON.parse(objects.get("essay-grading/data/app-data.json").toString("utf8"));
+  assert.ok(conflictSafeState.queueItems.some((item) => item.id === "q-external"));
+  assert.ok(conflictSafeState.queueItems.some((item) => item.id === "q-local"));
 
   await storage.deleteObjectKeys(storage.collectImageObjectKeys(storedState.queueItems));
   assert.strictEqual(objects.has(persistedImages[0].storageKey), false);

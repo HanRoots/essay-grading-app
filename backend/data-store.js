@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { promptCatalog } = require("./prompt-catalog");
 const { createSeedData, modelProviders: seedModelProviders } = require("./seed-data");
-const { getObjectBuffer, isOssEnabled, putObjectBuffer } = require("./oss-storage");
+const { getObjectBufferWithMeta, isOssEnabled, putObjectBuffer } = require("./oss-storage");
 const { ensureWorkspacePolicyData } = require("./workspace-policy");
 
 const DATA_DIR = path.join(__dirname, "data");
@@ -13,11 +13,9 @@ const DEEPSEEK_LEGACY_MODEL_ALIASES = {
   "deepseek-reasoner": "deepseek-v4-flash"
 };
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
-const OSS_DATA_CACHE_TTL_MS = 60 * 1000;
+const OSS_UPDATE_MAX_ATTEMPTS = 6;
 
 let dataOperationQueue = Promise.resolve();
-let cachedOssData = null;
-let cachedOssDataAt = 0;
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -51,6 +49,7 @@ async function writeData(data) {
 
 async function updateData(mutator) {
   return enqueueDataOperation(async () => {
+    if (isOssEnabled()) return updateOssData(mutator);
     const data = await readDataUnlocked();
     const result = await mutator(data);
     await writeDataUnlocked(data);
@@ -78,50 +77,75 @@ async function resetRuntimeWorkspaceData() {
 async function readDataUnlocked() {
   let data;
   if (isOssEnabled()) {
-    if (hasFreshOssDataCache()) {
-      data = cloneData(cachedOssData);
-    } else {
-      try {
-        const content = await getObjectBuffer(DATA_OBJECT_KEY);
-        data = JSON.parse(content.toString("utf8"));
-      } catch (error) {
-        if (!isMissingObjectError(error)) throw error;
-        data = createSeedData();
-        await writeDataUnlocked(data);
-      }
-      cacheOssData(data);
-    }
+    const snapshot = await readOssDataSnapshot();
+    data = snapshot.data;
   } else {
     data = readLocalData();
   }
-  if (migrateData(data)) {
+  if (migrateData(data) && !isOssEnabled()) {
     await writeDataUnlocked(data);
   }
   return data;
 }
 
-async function writeDataUnlocked(data) {
+async function writeDataUnlocked(data, options = {}) {
   const persisted = sanitizeDataForPersistence(data);
   if (isOssEnabled()) {
-    await putObjectBuffer(DATA_OBJECT_KEY, Buffer.from(JSON.stringify(persisted, null, 2), "utf8"), "application/json; charset=utf-8");
-    cacheOssData(persisted);
+    await putObjectBuffer(
+      DATA_OBJECT_KEY,
+      Buffer.from(JSON.stringify(persisted, null, 2), "utf8"),
+      "application/json; charset=utf-8",
+      options
+    );
   } else {
     writeLocalData(persisted);
   }
 }
 
-function hasFreshOssDataCache() {
-  return cachedOssData && Date.now() - cachedOssDataAt < OSS_DATA_CACHE_TTL_MS;
+async function readOssDataSnapshot() {
+  try {
+    const result = await getObjectBufferWithMeta(DATA_OBJECT_KEY);
+    return {
+      data: JSON.parse(result.content.toString("utf8")),
+      etag: result.etag,
+      exists: true
+    };
+  } catch (error) {
+    if (!isMissingObjectError(error)) throw error;
+    return { data: createSeedData(), etag: "", exists: false };
+  }
 }
 
-function cacheOssData(data) {
-  cachedOssData = cloneData(data);
-  cachedOssDataAt = Date.now();
+async function updateOssData(mutator) {
+  let lastConflict = null;
+  for (let attempt = 0; attempt < OSS_UPDATE_MAX_ATTEMPTS; attempt += 1) {
+    const snapshot = await readOssDataSnapshot();
+    const data = snapshot.data;
+    migrateData(data);
+    const result = await mutator(data);
+    try {
+      await writeDataUnlocked(data, snapshot.exists
+        ? { ifMatch: snapshot.etag }
+        : { ifNoneMatch: "*" });
+      return result;
+    } catch (error) {
+      if (!isOssWriteConflict(error)) throw error;
+      lastConflict = error;
+    }
+  }
+  const error = new Error("任务数据正在被其他请求更新，请稍后重试");
+  error.code = "OSS_CONCURRENT_UPDATE";
+  error.cause = lastConflict;
+  throw error;
 }
 
 function clearOssDataCacheForTests() {
-  cachedOssData = null;
-  cachedOssDataAt = 0;
+  // Kept for backward-compatible tests; the shared data object is no longer cached.
+}
+
+function isOssWriteConflict(error) {
+  return Number(error?.status || error?.statusCode) === 412 ||
+    ["PreconditionFailed", "ConditionNotMatch"].includes(String(error?.code || ""));
 }
 
 function enqueueDataOperation(operation) {
