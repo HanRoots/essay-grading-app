@@ -13,8 +13,6 @@ const DEEPSEEK_LEGACY_MODEL_ALIASES = {
   "deepseek-reasoner": "deepseek-v4-flash"
 };
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
-const OSS_UPDATE_MAX_ATTEMPTS = 6;
-
 let dataOperationQueue = Promise.resolve();
 
 function ensureDataFile() {
@@ -117,35 +115,16 @@ async function readOssDataSnapshot() {
 }
 
 async function updateOssData(mutator) {
-  let lastConflict = null;
-  for (let attempt = 0; attempt < OSS_UPDATE_MAX_ATTEMPTS; attempt += 1) {
-    const snapshot = await readOssDataSnapshot();
-    const data = snapshot.data;
-    migrateData(data);
-    const result = await mutator(data);
-    try {
-      await writeDataUnlocked(data, snapshot.exists
-        ? { ifMatch: snapshot.etag }
-        : { ifNoneMatch: "*" });
-      return result;
-    } catch (error) {
-      if (!isOssWriteConflict(error)) throw error;
-      lastConflict = error;
-    }
-  }
-  const error = new Error("任务数据正在被其他请求更新，请稍后重试");
-  error.code = "OSS_CONCURRENT_UPDATE";
-  error.cause = lastConflict;
-  throw error;
+  const snapshot = await readOssDataSnapshot();
+  const data = snapshot.data;
+  migrateData(data);
+  const result = await mutator(data);
+  await writeDataUnlocked(data);
+  return result;
 }
 
 function clearOssDataCacheForTests() {
   // Kept for backward-compatible tests; the shared data object is no longer cached.
-}
-
-function isOssWriteConflict(error) {
-  return Number(error?.status || error?.statusCode) === 412 ||
-    ["PreconditionFailed", "ConditionNotMatch"].includes(String(error?.code || ""));
 }
 
 function enqueueDataOperation(operation) {

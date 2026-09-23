@@ -103,9 +103,7 @@ async function putObjectBuffer(objectKey, content, contentType = "application/oc
     headers: {
       "Content-Type": contentType,
       "Cache-Control": options.cacheControl || "private, no-store",
-      ...(options.contentDisposition ? { "Content-Disposition": options.contentDisposition } : {}),
-      ...(options.ifMatch ? { "If-Match": options.ifMatch } : {}),
-      ...(options.ifNoneMatch ? { "If-None-Match": options.ifNoneMatch } : {})
+      ...(options.contentDisposition ? { "Content-Disposition": options.contentDisposition } : {})
     }
   });
   return result;
