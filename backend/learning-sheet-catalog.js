@@ -18,12 +18,15 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g3a-u7": "我有一个想法",
   "g3a-u8": "那次经历真难忘",
   "g3b-u1": "我的植物朋友",
+  "g3b-u2": "放风筝",
   "g3b-u3": "我做了一项小实验",
+  "g3b-u4": "中华传统节日",
   "g3b-u5": "奇妙的想象",
   "g3b-u6": "身边那些有特点的人",
   "g3b-u7": "国宝大熊猫",
   "g3b-u8": "这样想象真有趣",
   "g4a-u1": "推荐一个好地方",
+  "g4a-u2": "我的家人",
   "g4a-u3": "写观察日记",
   "g4a-u4": "我和谁过一天",
   "g4a-u5": "生活万花筒",
@@ -36,12 +39,14 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g4b-u8": "故事新编",
   "g5a-u1": "我的心爱之物",
   "g5a-u2": "漫画老师",
+  "g5a-u3": "故事新编",
   "g5a-u4": "二十年后的家乡",
   "g5a-u5": "介绍一种事物",
   "g5a-u6": "我想对您说",
   "g5a-u8": "推荐一本书",
   "g5b-u1": "那一刻我长大了",
   "g5b-u2": "写读后感",
+  "g5b-u3": "遨游汉字王国",
   "g5b-u4": "他怎么了",
   "g5b-u5": "形形色色的人",
   "g5b-u6": "神奇的探险之旅",
@@ -52,6 +57,9 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g6a-u3": "什么让生活更美好",
   "g6a-u4": "笔尖流出的故事",
   "g6a-u5": "围绕中心意思写",
+  "g6a-u6": "学写倡议书",
+  "g6a-u7": "插上科学的翅膀飞",
+  "g6a-u8": "传承好家风",
   "g6b-u1": "家乡的风俗",
   "g6b-u2": "写作品梗概",
   "g6b-u3": "让真情自然流露",
@@ -60,15 +68,10 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
 });
 
 const REVIEW_REQUIRED_SOURCE_TITLES = Object.freeze({
-  "g3b-u2": "看图画写一写",
-  "g4a-u2": "小小动物园",
   "g4a-u6": "多彩的活动",
   "g4a-u7": "写信",
   "g4a-u8": "我的心儿怦怦跳",
-  "g5a-u3": "缩写故事",
-  "g5a-u7": "什么即景",
-  "g6a-u7": "我的拿手好戏",
-  "g6a-u8": "有你真好"
+  "g5a-u7": "什么即景"
 });
 
 const promptById = new Map(promptCatalog.map((prompt) => [prompt.id, prompt]));
@@ -91,17 +94,12 @@ function buildLearningSheetEntry(prompt, sourceTitle) {
       format,
       fileName: `${baseName}.${format}`,
       relativePath: path.join(prompt.grade, prompt.book, `${baseName}.${format}`),
-      objectKey: `${getLearningSheetPrefix()}/${getLearningSheetObjectPromptId(prompt.id)}.${format}`,
+      objectKey: `${getLearningSheetPrefix()}/${prompt.id}.${format}`,
       contentType: format === "pdf"
         ? "application/pdf"
         : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     })])))
   });
-}
-
-function getLearningSheetObjectPromptId(promptId) {
-  // The existing OSS files were uploaded before the third/fourth unit correction.
-  return promptId === "g3b-u3" ? "g3b-u4" : promptId;
 }
 
 function getLearningSheetPrefix() {
