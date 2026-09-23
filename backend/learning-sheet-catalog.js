@@ -30,6 +30,9 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g4a-u3": "写观察日记",
   "g4a-u4": "我和谁过一天",
   "g4a-u5": "生活万花筒",
+  "g4a-u6": "中国的世界文化遗产",
+  "g4a-u7": "我的心儿怦怦跳",
+  "g4a-u8": "写信",
   "g4b-u1": "我的乐园",
   "g4b-u2": "我的奇思妙想",
   "g4b-u4": "我的动物朋友",
@@ -68,9 +71,6 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
 });
 
 const REVIEW_REQUIRED_SOURCE_TITLES = Object.freeze({
-  "g4a-u6": "多彩的活动",
-  "g4a-u7": "写信",
-  "g4a-u8": "我的心儿怦怦跳",
   "g5a-u7": "什么即景"
 });
 

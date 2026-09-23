@@ -11,11 +11,11 @@ const {
   withLearningSheetAvailability
 } = require("../backend/learning-sheet-catalog");
 
-assert.strictEqual(Object.keys(VERIFIED_SOURCE_TITLES).length, 56);
-assert.strictEqual(Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).length, 4);
+assert.strictEqual(Object.keys(VERIFIED_SOURCE_TITLES).length, 59);
+assert.strictEqual(Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).length, 1);
 
 const assets = getVerifiedLearningSheetAssets();
-assert.strictEqual(assets.length, 112);
+assert.strictEqual(assets.length, 118);
 assert.strictEqual(new Set(assets.map((asset) => asset.objectKey)).size, assets.length);
 assets.forEach((asset) => {
   assert.match(asset.objectKey, /^essay-grading\/learning-sheets\/g[3-6][ab]-u\d+\.(pdf|docx)$/);
@@ -30,7 +30,7 @@ Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).forEach((promptId) => {
 
 const decorated = withLearningSheetAvailability(promptCatalog);
 assert.strictEqual(decorated.length, 68);
-assert.strictEqual(decorated.filter((prompt) => prompt.learningSheet.available).length, 56);
+assert.strictEqual(decorated.filter((prompt) => prompt.learningSheet.available).length, 59);
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3a-u1").learningSheet.formats, ["pdf", "docx"]);
 assert.strictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").title, "我做了一项小实验");
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").learningSheet.formats, ["pdf", "docx"]);
@@ -43,6 +43,9 @@ assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g5b-u5").learni
   "g3b-u2",
   "g3b-u4",
   "g4a-u2",
+  "g4a-u6",
+  "g4a-u7",
+  "g4a-u8",
   "g5a-u3",
   "g5b-u3",
   "g6a-u6",
