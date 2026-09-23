@@ -375,22 +375,24 @@ const promptCatalogItems = [
     grade: "三年级",
     book: "下册",
     unit: "第三单元",
-    title: "中华传统节日",
-    type: "节日文化",
-    abilityGoal: "记事（节日文化）",
+    title: "我做了一项小实验",
+    type: "实验记录",
+    abilityGoal: "记叙（实验记录）",
     status: "资料已整理",
-    requirements: ["选择一个传统节日", "写一写过节的过程", "可以写印象深刻的节日故事", "写出节日特色和氛围"]
+    catalogVersion: 2,
+    requirements: ["写清楚实验步骤", "细致描写实验过程中的观察", "写出实验中的感受", "按照先后顺序有条理地叙述"]
   },
   {
     id: "g3b-u4",
     grade: "三年级",
     book: "下册",
     unit: "第四单元",
-    title: "我做了一项小实验",
-    type: "实验记录",
-    abilityGoal: "记叙（实验记录）",
+    title: "中华传统节日",
+    type: "节日文化",
+    abilityGoal: "记事（节日文化）",
     status: "资料已整理",
-    requirements: ["写清楚实验步骤", "细致描写实验过程中的观察", "写出实验中的感受", "按照先后顺序有条理地叙述"]
+    catalogVersion: 2,
+    requirements: ["选择一个传统节日", "写一写过节的过程", "可以写印象深刻的节日故事", "写出节日特色和氛围"]
   },
   {
     id: "g3b-u5",

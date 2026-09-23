@@ -32,6 +32,11 @@ const decorated = withLearningSheetAvailability(promptCatalog);
 assert.strictEqual(decorated.length, 68);
 assert.strictEqual(decorated.filter((prompt) => prompt.learningSheet.available).length, 47);
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3a-u1").learningSheet.formats, ["pdf", "docx"]);
+assert.strictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").title, "我做了一项小实验");
+assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").learningSheet.formats, ["pdf", "docx"]);
+assert.strictEqual(getLearningSheetAsset("g3b-u3", "pdf").objectKey, "essay-grading/learning-sheets/g3b-u4.pdf");
+assert.strictEqual(decorated.find((prompt) => prompt.id === "g3b-u4").title, "中华传统节日");
+assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3b-u4").learningSheet.formats, []);
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g7a-u1").learningSheet.formats, []);
 assert.strictEqual("objectKey" in decorated.find((prompt) => prompt.id === "g3a-u1").learningSheet, false);
 

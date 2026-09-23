@@ -118,12 +118,90 @@ async function run() {
       catalogVersion: 1,
       requirements: ["旧版要求"]
     });
+    const oldThirdUnit = data.promptLibrary.find((item) => item.id === "g3b-u3");
+    Object.assign(oldThirdUnit, {
+      title: "中华传统节日",
+      type: "节日文化",
+      status: "本地已配置",
+      catalogVersion: 1,
+      requirements: ["旧版第三单元要求"]
+    });
+    const oldFourthUnit = data.promptLibrary.find((item) => item.id === "g3b-u4");
+    Object.assign(oldFourthUnit, {
+      title: "我做了一项小实验",
+      type: "实验记录",
+      status: "本地已配置",
+      catalogVersion: 1,
+      requirements: ["旧版第四单元要求"]
+    });
+    data.queueItems.push({
+      id: "q-old-festival",
+      promptId: "g3b-u3",
+      grade: "三年级",
+      book: "下册",
+      unit: "第三单元",
+      meta: "三年级下册 第三单元 中华传统节日",
+      report: {
+        id: "r-old-festival",
+        prompt: {
+          id: "g3b-u3",
+          grade: "三年级",
+          book: "下册",
+          unit: "第三单元",
+          title: "中华传统节日"
+        },
+        requirements: [{ label: "选择一个传统节日", level: "良好" }]
+      }
+    });
+    data.reports.push({
+      id: "r-old-experiment",
+      prompt: {
+        id: "g3b-u4",
+        grade: "三年级",
+        book: "下册",
+        unit: "第四单元",
+        title: "我做了一项小实验"
+      },
+      requirements: [{ label: "写清楚实验步骤", level: "优秀" }]
+    });
+    data.submissions.push({
+      id: "s-old-experiment",
+      promptId: "g3b-u4",
+      grade: "三年级",
+      book: "下册",
+      unit: "第四单元",
+      meta: "三年级下册 第四单元 我做了一项小实验"
+    });
   });
   const migrated = await readData();
   const migratedPrompt = migrated.promptLibrary.find((item) => item.id === "g3a-u3");
   assert.strictEqual(migratedPrompt.title, "续写故事");
   assert.strictEqual(migratedPrompt.catalogVersion, 2);
   assert.strictEqual(migratedPrompt.requirements.length, 24);
+  const migratedThirdUnit = migrated.promptLibrary.find((item) => item.id === "g3b-u3");
+  const migratedFourthUnit = migrated.promptLibrary.find((item) => item.id === "g3b-u4");
+  assert.strictEqual(migratedThirdUnit.title, "我做了一项小实验");
+  assert.strictEqual(migratedThirdUnit.type, "实验记录");
+  assert.strictEqual(migratedThirdUnit.catalogVersion, 2);
+  assert.strictEqual(migratedFourthUnit.title, "中华传统节日");
+  assert.strictEqual(migratedFourthUnit.type, "节日文化");
+  assert.strictEqual(migratedFourthUnit.catalogVersion, 2);
+  const migratedFestivalTask = migrated.queueItems.find((item) => item.id === "q-old-festival");
+  assert.strictEqual(migratedFestivalTask.promptId, "g3b-u4");
+  assert.strictEqual(migratedFestivalTask.unit, "第四单元");
+  assert.strictEqual(migratedFestivalTask.meta, "三年级下册 第四单元 中华传统节日");
+  assert.strictEqual(migratedFestivalTask.report.prompt.id, "g3b-u4");
+  assert.strictEqual(migratedFestivalTask.report.prompt.title, "中华传统节日");
+  assert.strictEqual(migratedFestivalTask.report.requirements[0].level, "良好");
+  const migratedExperimentReport = migrated.reports.find((item) => item.id === "r-old-experiment");
+  assert.strictEqual(migratedExperimentReport.prompt.id, "g3b-u3");
+  assert.strictEqual(migratedExperimentReport.prompt.unit, "第三单元");
+  assert.strictEqual(migratedExperimentReport.prompt.title, "我做了一项小实验");
+  assert.strictEqual(migratedExperimentReport.requirements[0].level, "优秀");
+  const migratedExperimentSubmission = migrated.submissions.find((item) => item.id === "s-old-experiment");
+  assert.strictEqual(migratedExperimentSubmission.promptId, "g3b-u3");
+  assert.strictEqual(migratedExperimentSubmission.unit, "第三单元");
+  assert.strictEqual(migratedExperimentSubmission.meta, "三年级下册 第三单元 我做了一项小实验");
   await updateData((data) => {
     data.modelConfig.apiKey = "must-not-persist";
     data.queueItems = [{

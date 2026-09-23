@@ -247,6 +247,9 @@ function migrateData(data) {
     data.queueItems = [];
     changed = true;
   }
+  if (migrateThirdGradeSecondBookUnitSwap(data)) {
+    changed = true;
+  }
   data.queueItems.forEach((item) => {
     const errorMessage = String(item?.gradingError || "");
     if (item?.status !== "failed" || !OBSOLETE_OSS_WRITE_ERRORS.some((message) => errorMessage.includes(message))) {
@@ -337,6 +340,81 @@ function migrateData(data) {
   }
 
   return changed;
+}
+
+function migrateThirdGradeSecondBookUnitSwap(data) {
+  let changed = false;
+  const storedItems = [
+    ...(Array.isArray(data.queueItems) ? data.queueItems : []),
+    ...(Array.isArray(data.submissions) ? data.submissions : [])
+  ];
+
+  storedItems.forEach((item) => {
+    if (migrateStoredPromptReference(item)) changed = true;
+    if (migrateStoredReportPrompt(item?.report)) changed = true;
+  });
+  (Array.isArray(data.reports) ? data.reports : []).forEach((report) => {
+    if (migrateStoredReportPrompt(report)) changed = true;
+  });
+  return changed;
+}
+
+function migrateStoredPromptReference(item) {
+  if (!item || typeof item !== "object" || item.customPrompt?.active) return false;
+  const prompt = getSwappedCanonicalPrompt([
+    item.report?.prompt?.title,
+    item.meta,
+    item.title
+  ]);
+  if (!prompt || !isLegacySwappedPromptReference(item, prompt)) return false;
+
+  const nextValues = {
+    promptId: prompt.id,
+    grade: prompt.grade,
+    book: prompt.book,
+    unit: prompt.unit,
+    meta: `${prompt.grade}${prompt.book} ${prompt.unit} ${prompt.title}`
+  };
+  let changed = false;
+  Object.entries(nextValues).forEach(([key, value]) => {
+    if (item[key] === value) return;
+    item[key] = value;
+    changed = true;
+  });
+  return changed;
+}
+
+function migrateStoredReportPrompt(report) {
+  if (!report?.prompt || typeof report.prompt !== "object") return false;
+  const prompt = getSwappedCanonicalPrompt([report.prompt.title]);
+  if (!prompt || !isLegacySwappedPromptReference(report.prompt, prompt)) return false;
+  const nextPrompt = cloneData(prompt);
+  if (JSON.stringify(report.prompt) === JSON.stringify(nextPrompt)) return false;
+  report.prompt = nextPrompt;
+  return true;
+}
+
+function getSwappedCanonicalPrompt(values) {
+  const text = values.map((value) => String(value || "")).join("\n");
+  const title = text.includes("我做了一项小实验")
+    ? "我做了一项小实验"
+    : text.includes("中华传统节日")
+      ? "中华传统节日"
+      : "";
+  if (!title) return null;
+  return promptCatalog.find((prompt) => (
+    prompt.grade === "三年级"
+    && prompt.book === "下册"
+    && prompt.title === title
+  )) || null;
+}
+
+function isLegacySwappedPromptReference(reference, canonicalPrompt) {
+  const promptId = String(reference.promptId || reference.id || "");
+  if (!promptId || !["g3b-u3", "g3b-u4"].includes(promptId)) return false;
+  return promptId !== canonicalPrompt.id
+    || reference.unit !== canonicalPrompt.unit
+    || (reference.title !== undefined && reference.title !== canonicalPrompt.title);
 }
 
 function migrateDeepSeekModelNames(data) {

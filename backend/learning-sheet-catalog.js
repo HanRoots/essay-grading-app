@@ -18,7 +18,7 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g3a-u7": "我有一个想法",
   "g3a-u8": "那次经历真难忘",
   "g3b-u1": "我的植物朋友",
-  "g3b-u4": "我做了一项小实验",
+  "g3b-u3": "我做了一项小实验",
   "g3b-u5": "奇妙的想象",
   "g3b-u6": "身边那些有特点的人",
   "g3b-u7": "国宝大熊猫",
@@ -91,12 +91,17 @@ function buildLearningSheetEntry(prompt, sourceTitle) {
       format,
       fileName: `${baseName}.${format}`,
       relativePath: path.join(prompt.grade, prompt.book, `${baseName}.${format}`),
-      objectKey: `${getLearningSheetPrefix()}/${prompt.id}.${format}`,
+      objectKey: `${getLearningSheetPrefix()}/${getLearningSheetObjectPromptId(prompt.id)}.${format}`,
       contentType: format === "pdf"
         ? "application/pdf"
         : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     })])))
   });
+}
+
+function getLearningSheetObjectPromptId(promptId) {
+  // The existing OSS files were uploaded before the third/fourth unit correction.
+  return promptId === "g3b-u3" ? "g3b-u4" : promptId;
 }
 
 function getLearningSheetPrefix() {
