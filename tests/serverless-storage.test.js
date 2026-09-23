@@ -134,6 +134,12 @@ async function run() {
       catalogVersion: 1,
       requirements: ["旧版第四单元要求"]
     });
+    const oldFifthGradePrompt = data.promptLibrary.find((item) => item.id === "g5b-u5");
+    Object.assign(oldFifthGradePrompt, {
+      title: "把一个人的特点写具体",
+      status: "本地已配置",
+      catalogVersion: 1
+    });
     data.queueItems.push({
       id: "q-old-festival",
       promptId: "g3b-u3",
@@ -172,6 +178,25 @@ async function run() {
       unit: "第四单元",
       meta: "三年级下册 第四单元 我做了一项小实验"
     });
+    data.queueItems.push({
+      id: "q-old-people",
+      promptId: "g5b-u5",
+      grade: "五年级",
+      book: "下册",
+      unit: "第五单元",
+      meta: "五年级下册 第五单元 把一个人的特点写具体",
+      report: {
+        id: "r-old-people",
+        prompt: {
+          id: "g5b-u5",
+          grade: "五年级",
+          book: "下册",
+          unit: "第五单元",
+          title: "把一个人的特点写具体"
+        },
+        teacherComment: "保留原批改评语"
+      }
+    });
   });
   const migrated = await readData();
   const migratedPrompt = migrated.promptLibrary.find((item) => item.id === "g3a-u3");
@@ -202,6 +227,13 @@ async function run() {
   assert.strictEqual(migratedExperimentSubmission.promptId, "g3b-u3");
   assert.strictEqual(migratedExperimentSubmission.unit, "第三单元");
   assert.strictEqual(migratedExperimentSubmission.meta, "三年级下册 第三单元 我做了一项小实验");
+  const migratedFifthGradePrompt = migrated.promptLibrary.find((item) => item.id === "g5b-u5");
+  assert.strictEqual(migratedFifthGradePrompt.title, "形形色色的人");
+  assert.strictEqual(migratedFifthGradePrompt.catalogVersion, 2);
+  const migratedPeopleTask = migrated.queueItems.find((item) => item.id === "q-old-people");
+  assert.strictEqual(migratedPeopleTask.meta, "五年级下册 第五单元 形形色色的人");
+  assert.strictEqual(migratedPeopleTask.report.prompt.title, "形形色色的人");
+  assert.strictEqual(migratedPeopleTask.report.teacherComment, "保留原批改评语");
   await updateData((data) => {
     data.modelConfig.apiKey = "must-not-persist";
     data.queueItems = [{

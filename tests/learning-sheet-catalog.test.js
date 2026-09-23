@@ -11,11 +11,11 @@ const {
   withLearningSheetAvailability
 } = require("../backend/learning-sheet-catalog");
 
-assert.strictEqual(Object.keys(VERIFIED_SOURCE_TITLES).length, 47);
-assert.strictEqual(Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).length, 10);
+assert.strictEqual(Object.keys(VERIFIED_SOURCE_TITLES).length, 48);
+assert.strictEqual(Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).length, 9);
 
 const assets = getVerifiedLearningSheetAssets();
-assert.strictEqual(assets.length, 94);
+assert.strictEqual(assets.length, 96);
 assert.strictEqual(new Set(assets.map((asset) => asset.objectKey)).size, assets.length);
 assets.forEach((asset) => {
   assert.match(asset.objectKey, /^essay-grading\/learning-sheets\/g[3-6][ab]-u\d+\.(pdf|docx)$/);
@@ -30,13 +30,15 @@ Object.keys(REVIEW_REQUIRED_SOURCE_TITLES).forEach((promptId) => {
 
 const decorated = withLearningSheetAvailability(promptCatalog);
 assert.strictEqual(decorated.length, 68);
-assert.strictEqual(decorated.filter((prompt) => prompt.learningSheet.available).length, 47);
+assert.strictEqual(decorated.filter((prompt) => prompt.learningSheet.available).length, 48);
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3a-u1").learningSheet.formats, ["pdf", "docx"]);
 assert.strictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").title, "我做了一项小实验");
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3b-u3").learningSheet.formats, ["pdf", "docx"]);
 assert.strictEqual(getLearningSheetAsset("g3b-u3", "pdf").objectKey, "essay-grading/learning-sheets/g3b-u4.pdf");
 assert.strictEqual(decorated.find((prompt) => prompt.id === "g3b-u4").title, "中华传统节日");
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g3b-u4").learningSheet.formats, []);
+assert.strictEqual(decorated.find((prompt) => prompt.id === "g5b-u5").title, "形形色色的人");
+assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g5b-u5").learningSheet.formats, ["pdf", "docx"]);
 assert.deepStrictEqual(decorated.find((prompt) => prompt.id === "g7a-u1").learningSheet.formats, []);
 assert.strictEqual("objectKey" in decorated.find((prompt) => prompt.id === "g3a-u1").learningSheet, false);
 

@@ -250,6 +250,9 @@ function migrateData(data) {
   if (migrateThirdGradeSecondBookUnitSwap(data)) {
     changed = true;
   }
+  if (migrateRenamedFifthGradePrompt(data)) {
+    changed = true;
+  }
   data.queueItems.forEach((item) => {
     const errorMessage = String(item?.gradingError || "");
     if (item?.status !== "failed" || !OBSOLETE_OSS_WRITE_ERRORS.some((message) => errorMessage.includes(message))) {
@@ -357,6 +360,40 @@ function migrateThirdGradeSecondBookUnitSwap(data) {
     if (migrateStoredReportPrompt(report)) changed = true;
   });
   return changed;
+}
+
+function migrateRenamedFifthGradePrompt(data) {
+  let changed = false;
+  const storedItems = [
+    ...(Array.isArray(data.queueItems) ? data.queueItems : []),
+    ...(Array.isArray(data.submissions) ? data.submissions : [])
+  ];
+
+  storedItems.forEach((item) => {
+    if (!item || typeof item !== "object" || item.customPrompt?.active || item.promptId !== "g5b-u5") return;
+    const prompt = promptCatalog.find((catalogItem) => catalogItem.id === "g5b-u5");
+    if (!prompt) return;
+    const nextMeta = `${prompt.grade}${prompt.book} ${prompt.unit} ${prompt.title}`;
+    if (item.meta !== nextMeta) {
+      item.meta = nextMeta;
+      changed = true;
+    }
+    if (migrateRenamedFifthGradeReport(item.report, prompt)) changed = true;
+  });
+
+  (Array.isArray(data.reports) ? data.reports : []).forEach((report) => {
+    const prompt = promptCatalog.find((catalogItem) => catalogItem.id === "g5b-u5");
+    if (migrateRenamedFifthGradeReport(report, prompt)) changed = true;
+  });
+  return changed;
+}
+
+function migrateRenamedFifthGradeReport(report, prompt) {
+  if (!report?.prompt || !prompt || report.prompt.id !== "g5b-u5") return false;
+  const nextPrompt = cloneData(prompt);
+  if (JSON.stringify(report.prompt) === JSON.stringify(nextPrompt)) return false;
+  report.prompt = nextPrompt;
+  return true;
 }
 
 function migrateStoredPromptReference(item) {

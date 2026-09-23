@@ -43,6 +43,7 @@ const VERIFIED_SOURCE_TITLES = Object.freeze({
   "g5b-u1": "那一刻我长大了",
   "g5b-u2": "写读后感",
   "g5b-u4": "他怎么了",
+  "g5b-u5": "形形色色的人",
   "g5b-u6": "神奇的探险之旅",
   "g5b-u7": "中国的世界文化遗产",
   "g5b-u8": "漫画的启示",
@@ -66,7 +67,6 @@ const REVIEW_REQUIRED_SOURCE_TITLES = Object.freeze({
   "g4a-u8": "我的心儿怦怦跳",
   "g5a-u3": "缩写故事",
   "g5a-u7": "什么即景",
-  "g5b-u5": "形形色色的人",
   "g6a-u7": "我的拿手好戏",
   "g6a-u8": "有你真好"
 });

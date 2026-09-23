@@ -999,10 +999,11 @@ const promptCatalogItems = [
     grade: "五年级",
     book: "下册",
     unit: "第五单元",
-    title: "把一个人的特点写具体",
+    title: "形形色色的人",
     type: "综合写人",
     abilityGoal: "写人（综合运用）",
     status: "资料已整理",
+    catalogVersion: 2,
     requirements: ["选择一个熟悉的人", "抓住人物特点", "通过具体事例表现人物特点", "运用多种描写方法让人物形象更生动"]
   },
   {
