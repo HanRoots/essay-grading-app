@@ -149,6 +149,18 @@ async function run() {
   assert.strictEqual(lastPutOptions.headers["If-Match"], undefined);
   assert.strictEqual(lastPutOptions.headers["If-None-Match"], undefined);
 
+  await updateData((data) => {
+    data.queueItems.unshift({
+      id: "q-stale-error",
+      status: "failed",
+      gradingError: "A header you provided implies functionality that is not implemented."
+    });
+  });
+  const recoveredState = await readData();
+  const recoveredItem = recoveredState.queueItems.find((item) => item.id === "q-stale-error");
+  assert.strictEqual(recoveredItem.status, "draft");
+  assert.strictEqual(recoveredItem.gradingError, "");
+
   await storage.deleteObjectKeys(storage.collectImageObjectKeys(storedState.queueItems));
   assert.strictEqual(objects.has(persistedImages[0].storageKey), false);
   console.log("serverless storage test passed");

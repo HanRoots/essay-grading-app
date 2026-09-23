@@ -13,6 +13,10 @@ const DEEPSEEK_LEGACY_MODEL_ALIASES = {
   "deepseek-reasoner": "deepseek-v4-flash"
 };
 const VISION_READING_PROVIDER_IDS = new Set(["kimi", "deepseek"]);
+const OBSOLETE_OSS_WRITE_ERRORS = [
+  "A header you provided implies functionality that is not implemented",
+  "PutObject does not support conditional headers"
+];
 let dataOperationQueue = Promise.resolve();
 
 function ensureDataFile() {
@@ -239,6 +243,19 @@ function migrateData(data) {
     data.submissions = [];
     changed = true;
   }
+  if (!Array.isArray(data.queueItems)) {
+    data.queueItems = [];
+    changed = true;
+  }
+  data.queueItems.forEach((item) => {
+    const errorMessage = String(item?.gradingError || "");
+    if (item?.status !== "failed" || !OBSOLETE_OSS_WRITE_ERRORS.some((message) => errorMessage.includes(message))) {
+      return;
+    }
+    item.status = item.report ? "done" : "draft";
+    item.gradingError = "";
+    changed = true;
+  });
   if (!data.nextIds) {
     data.nextIds = { submission: 1, report: 1 };
     changed = true;
